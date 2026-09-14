@@ -1,0 +1,9 @@
+{
+  "include": ["src", "tests", "examples"],
+  "exclude": ["**/__pycache__", "**/*.egg-info"],
+  "extraPaths": ["src"],
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportUnusedImport": false
+}
