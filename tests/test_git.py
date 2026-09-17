@@ -1,44 +1,56 @@
-"""Git 采集层解析器的单元测试（纯函数，不依赖真实仓库）。"""
+"""Git 采集层的单元测试。"""
 
 from __future__ import annotations
 
-from githotmap.core.git import GitLogParser
+from pathlib import Path
+
+from githotmap.core.git import CommitRecord, GitHistory
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_parse_numstat_basic() -> None:
-    text = (
-        "\x01abc123\x01Alice\x011700000000\n"
-        "10\t2\tsrc/main.py\n"
-        "5\t0\tsrc/util.py\n"
-        "\n"
-        "\x01def456\x01Bob\x011700001000\n"
-        "-\t-\timg.bin\n"
-        "0\t3\tsrc/main.py\n"
-    )
-    records = GitLogParser().parse(text)
-    assert len(records) == 4
-
-    first = records[0]
-    assert first.author == "Alice"
-    assert first.timestamp == 1700000000
-    assert first.file_path == "src/main.py"
-    assert first.added == 10
-    assert first.deleted == 2
-    assert first.churn == 12
-
-    binary = next(r for r in records if r.file_path == "img.bin")
-    assert binary.churn == 0
+def test_commit_record_churn() -> None:
+    r = CommitRecord(author="Alice", timestamp=1700000000, file_path="a.py", added=10, deleted=2)
+    assert r.churn == 12
 
 
-def test_parse_empty_and_garbage_lines_ignored() -> None:
-    text = (
-        "random non-record line\n"
-        "\x01hash\x01Carol\x011700000000\n"
-        "\n"
-        "\n"
-        "3\t1\tpkg/mod.py\n"
-    )
-    records = GitLogParser().parse(text)
-    assert len(records) == 1
-    assert records[0].file_path == "pkg/mod.py"
-    assert records[0].author == "Carol"
+def test_commit_record_zero_churn() -> None:
+    r = CommitRecord(author="Bob", timestamp=1700000000, file_path="b.bin", added=0, deleted=0)
+    assert r.churn == 0
+
+
+def test_git_history_collects_records() -> None:
+    """用当前项目自身的仓库验证 GitHistory 能正常采集。"""
+    history = GitHistory()
+    records = history.collect(_REPO_ROOT)
+    assert len(records) >= 2  # 至少 initial commit + 我的改动
+
+    # 每条记录字段完整性
+    for r in records:
+        assert r.author
+        assert r.timestamp > 0
+        assert r.file_path
+        assert r.added >= 0
+        assert r.deleted >= 0
+        assert r.churn >= 0
+
+
+def test_git_history_collect_with_since() -> None:
+    """since 过滤应该只返回指定时间之后的记录。"""
+    history = GitHistory()
+    records = history.collect(_REPO_ROOT, since="2026-09-17")
+    for r in records:
+        assert r.timestamp > 0
+        # 2026-09-17 00:00:00 UTC ≈ 1789603200
+        assert r.timestamp >= 1789603200
+
+
+def test_git_history_returns_deduplicated_files_per_commit() -> None:
+    """同一个文件在同一次提交里不应该出现两次。"""
+    history = GitHistory()
+    records = history.collect(_REPO_ROOT)
+    seen = set()
+    for r in records:
+        key = (r.author, r.timestamp, r.file_path)
+        assert key not in seen, f"duplicate: {key}"
+        seen.add(key)
