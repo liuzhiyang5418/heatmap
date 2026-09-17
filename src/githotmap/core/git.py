@@ -86,9 +86,9 @@ class GitHistory:
             for path, stats in commit.stats.files.items():
                 records.append(
                     CommitRecord(
-                        author=author,
+                        author=author or "",
                         timestamp=timestamp,
-                        file_path=path,
+                        file_path=str(path),
                         added=stats.get("insertions", 0),
                         deleted=stats.get("deletions", 0),
                     )
