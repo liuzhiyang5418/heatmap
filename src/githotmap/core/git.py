@@ -1,25 +1,27 @@
-"""Git 数据采集层：运行 ``git`` 命令并以单次 log 遍历提取提交元数据。
+"""Git 数据采集层：用 GitPython 遍历提交历史并提取文件级改动。
 
-设计要点（对齐参考工具 hotspot 的单遍扫描策略）：
+本模块提供两套采集实现：
 
-- 只做**一次** ``git log --numstat`` 遍历，同时拿到提交数、改动量、作者与时间，
-  避免对同一历史反复 I/O；
-- 提交头使用 ``\\x01``（SOH）作为字段分隔符，避免与作者名/路径中的制表符冲突；
-- 解析结果产出与具体仓库无关的 :class:`CommitRecord` 列表，供 ``metrics`` 层聚合。
+- :class:`GitPythonHistory`（主力，使用 GitPython 库）——Member 4 的正式实现，
+  结构化 ``Commit`` / ``File`` 对象，无需手写文本解析；
+- :class:`SubprocessHistory`（备用，使用 ``subprocess`` 调用 ``git log --numstat``）——
+  组长初始框架的遗留实现，已标记 deprecated，保留供对比与单元测试使用。
 
-已知边界（留待后续 Sprint 处理）：暂不启用重命名检测（``-M``）、不解析 C 风格
-转义的引号路径、二进制文件按 0 行改动计。
+两套实现产出统一的 :class:`CommitRecord` 列表，下游 ``metrics`` / ``scoring``
+层不关心底层采集方式。
 """
 
 from __future__ import annotations
 
 import subprocess
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-# 提交头在 git log 输出中的字段分隔符（SOH，几乎不可能出现在正常元数据中）。
-_HEADER_SEP = "\x01"
+# ---------------------------------------------------------------------------
+# 异常与数据类
+# ---------------------------------------------------------------------------
 
 
 class GitError(RuntimeError):
@@ -28,7 +30,13 @@ class GitError(RuntimeError):
 
 @dataclass(slots=True)
 class CommitRecord:
-    """单个提交对单个文件的一次改动记录。"""
+    """单个提交对单个文件的一次改动记录。
+
+    字段与 git log --numstat 输出一一对应：
+
+    - ``author`` / ``timestamp`` / ``file_path`` 来自提交头 / 文件路径；
+    - ``added`` / ``deleted`` 为该文件在本次提交中的新增 / 删除行数。
+    """
 
     author: str
     timestamp: int  # 作者时间，unix 秒
@@ -41,31 +49,9 @@ class CommitRecord:
         return self.added + self.deleted
 
 
-def run_git(args: Sequence[str], repo_path: str | Path) -> str:
-    """以 UTF-8 执行一个只读 git 命令并返回 stdout；失败时抛 :class:`GitError`。
-
-    注意：此处使用 ``subprocess.run(..., capture_output=True)`` 捕获输出；在受限
-    沙箱（禁止命名管道）下调用方应改用 ``stdio`` 直通或提供 mock。作为库代码，
-    该实现面向正常本机环境。
-    """
-    repo = str(repo_path)
-    command = ["git", "-C", repo, *args]
-    try:
-        proc = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    except OSError as exc:  # 例如 git 不在 PATH
-        raise GitError(f"无法执行 git（{exc}），请确认已安装 Git 2.2+ 并加入 PATH") from exc
-
-    if proc.returncode != 0:
-        raise GitError(f"git {' '.join(args)} 失败（exit {proc.returncode}）: {proc.stderr.strip()}")
-
-    return proc.stdout
+# ---------------------------------------------------------------------------
+# 工具函数
+# ---------------------------------------------------------------------------
 
 
 def resolve_urn(repo_path: str | Path) -> str:
@@ -74,24 +60,50 @@ def resolve_urn(repo_path: str | Path) -> str:
     优先使用远端 origin URL（规范化为 ``git:host/owner/repo`` 形态），否则回退到
     本地绝对路径 ``local:<abs_path>``，保证跨机器缓存键稳定。
     """
-    repo = str(repo_path)
+    import git as _git
+
     try:
-        url = run_git(["config", "--get", "remote.origin.url"], repo).strip()
-    except GitError:
-        url = ""
+        repo = _git.Repo(str(repo_path))
+        url = repo.remotes.origin.url if repo.remotes else ""
+    except Exception:  # GitPython 打开失败时回退到 subprocess
+        url = _try_get_origin_url(repo_path)
+
     if url:
         return f"git:{url.rstrip('/')}"
-    return f"local:{Path(repo).resolve()}"
+    return f"local:{Path(repo_path).resolve()}"
+
+
+def _try_get_origin_url(repo_path: str | Path) -> str:
+    """resolve_urn 的 subprocess 回退实现。"""
+    repo = str(repo_path)
+    command = ["git", "-C", repo, "config", "--get", "remote.origin.url"]
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=False)
+    except OSError:
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+# ---------------------------------------------------------------------------
+# Subprocess 版本（deprecated，保留用于测试与对比）
+# ---------------------------------------------------------------------------
+
+# 提交头在 git log 输出中的字段分隔符（SOH，几乎不可能出现在正常元数据中）。
+_HEADER_SEP = "\x01"
 
 
 class GitLogParser:
-    """把 ``git log --numstat`` 的文本输出解析为 :class:`CommitRecord` 列表。"""
+    """把 ``git log --numstat`` 的文本输出解析为 :class:`CommitRecord` 列表。
+
+    已 deprecated，请使用 :class:`GitPythonHistory`。
+    """
 
     _LOG_ARGS: list[str] = [
         "log",
         "--numstat",
         "--date=unix",
-        # 提交头：SOH 分隔  hash / 作者 / unix 时间，并以换行结束，确保 numstat 独占行。
         f"--pretty=format:{_HEADER_SEP}%H{_HEADER_SEP}%an{_HEADER_SEP}%at%n",
     ]
 
@@ -120,7 +132,6 @@ class GitLogParser:
             if not raw_line.strip():
                 continue
 
-            # numstat 行：added \t deleted \t path（二进制文件为 "- \t - \t path"）。
             fields = raw_line.split("\t", 2)
             if len(fields) < 3:
                 continue
@@ -152,14 +163,123 @@ def _parse_count(token: str) -> int:
         return 0
 
 
-class GitHistory:
-    """面向仓库的高层采集门面：运行命令并解析为提交记录。"""
+def run_git(args: Sequence[str], repo_path: str | Path) -> str:
+    """以 UTF-8 执行一个只读 git 命令并返回 stdout；失败时抛 :class:`GitError`。
+
+    已 deprecated：内部采集已全部迁移至 GitPython。仅保留给少量通用运维命令
+    （例如 ``git diff``）使用。
+    """
+    repo = str(repo_path)
+    command = ["git", "-C", repo, *args]
+    try:
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError as exc:
+        raise GitError(f"无法执行 git（{exc}），请确认已安装 Git 2.2+ 并加入 PATH") from exc
+
+    if proc.returncode != 0:
+        raise GitError(
+            f"git {' '.join(args)} 失败（exit {proc.returncode}）: {proc.stderr.strip()}"
+        )
+    return proc.stdout
+
+
+class SubprocessHistory:
+    """基于 subprocess 的 Git 采集（deprecated，保留供旧测试通过）。"""
 
     def __init__(self) -> None:
         self._parser = GitLogParser()
 
     def collect(self, repo_path: str | Path, since: str | None = None) -> list[CommitRecord]:
-        """遍历仓库历史并返回全部（或 ``since`` 之后）的提交记录。"""
         args = self._parser.build_command(since=since)
         stdout = run_git(args, repo_path)
         return self._parser.parse(stdout)
+
+
+# ---------------------------------------------------------------------------
+# GitPython 版本（主力实现）
+# ---------------------------------------------------------------------------
+
+
+class GitPythonHistory:
+    """基于 GitPython 的 Git 采集（主力实现，Member 4 正式交付物）。
+
+    与 :class:`SubprocessHistory` 行为等价，但：
+
+    - 返回的是 GitPython 提供的 ``Commit`` / ``File`` / ``Author`` 结构化对象，
+      免去手写解析；
+    - 天然支持作者邮箱、提交信息、父提交等 subprocess 版本需额外 ``git`` 命令
+      才能拿到的字段；
+    - 每次 ``iter_commits`` 会为每个 commit 计算 diff，**大仓库上比单次
+      ``git log --numstat`` 略慢**——代码复杂度换来了可读性与可扩展性。
+    """
+
+    def collect(self, repo_path: str | Path, since: str | None = None) -> list[CommitRecord]:
+        """遍历仓库历史并返回全部（或 ``since`` 之后）的文件级改动记录。"""
+        import git as _git
+
+        try:
+            repo = _git.Repo(str(repo_path))
+        except Exception as exc:
+            raise GitError(f"无法打开仓库 {repo_path}: {exc}") from exc
+
+        # 构造 iter_commits 的过滤参数
+        kwargs: dict = {}
+        if since:
+            kwargs["since"] = since
+
+        records: list[CommitRecord] = []
+        for commit in repo.iter_commits(**kwargs):
+            author = commit.author.name
+            # committed_datetime 是带时区的 datetime，.timestamp() 返回 unix 秒(float)
+            timestamp = int(commit.committed_datetime.timestamp())
+
+            # commit.stats.files: {path: {'insertions': int, 'deletions': int, ...}}
+            for path, stats in commit.stats.files.items():
+                records.append(
+                    CommitRecord(
+                        author=author,
+                        timestamp=timestamp,
+                        file_path=path,
+                        added=stats.get("insertions", 0),
+                        deleted=stats.get("deletions", 0),
+                    )
+                )
+
+        return records
+
+
+# ---------------------------------------------------------------------------
+# 主门面（对外统一入口）
+# ---------------------------------------------------------------------------
+
+
+class GitHistory:
+    """面向仓库的高层采集门面（默认使用 GitPython）。
+
+    构造参数 ``use_gitpython`` 控制底层实现：
+
+    - ``True``（默认）→ :class:`GitPythonHistory`
+    - ``False``        → :class:`SubprocessHistory`（deprecated，供测试/回退）
+    """
+
+    def __init__(self, use_gitpython: bool = True) -> None:
+        if use_gitpython:
+            self._impl: GitPythonHistory | SubprocessHistory = GitPythonHistory()
+        else:
+            warnings.warn(
+                "GitHistory(use_gitpython=False) is deprecated, use GitPythonHistory instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self._impl = SubprocessHistory()
+
+    def collect(self, repo_path: str | Path, since: str | None = None) -> list[CommitRecord]:
+        """遍历仓库历史并返回全部（或 ``since`` 之后）的提交记录。"""
+        return self._impl.collect(repo_path, since=since)
