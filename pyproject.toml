@@ -20,9 +20,11 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Quality Assurance",
 ]
-# 运行时零第三方硬依赖：核心引擎与 HTML 渲染全部基于标准库。
-# 可选依赖仅用于开发/测试。
-dependencies = []
+# GitPython 是 Git History Analyzer（Member 4）的核心依赖，
+# 用于替代 subprocess + 手写解析器的方案，提供结构化的 Commit/File 对象。
+dependencies = [
+    "GitPython>=3.1",
+]
 
 [project.optional-dependencies]
 dev = [

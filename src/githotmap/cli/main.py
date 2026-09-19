@@ -51,6 +51,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="排除路径模式，可重复（如 '**/node_modules/'）",
     )
+
+    history = sub.add_parser("history", help="历史数据分析（贡献者/分支/知识孤岛）")
+    history.add_argument("--repo-path", default=".", help="Git 仓库路径（默认当前目录）")
+    history.add_argument("--since", help="仅统计该时间之后的提交（如 '30 days ago'）")
+    history.add_argument(
+        "--top-n", type=int, default=10, help="贡献者排名前 N 位（默认 10）"
+    )
+    history.add_argument(
+        "--min-churn",
+        type=int,
+        default=0,
+        help="知识孤岛的最小总改动量（过滤拼写修正等噪声，默认 0）",
+    )
     return parser
 
 
@@ -96,6 +109,85 @@ def _run_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_history(args: argparse.Namespace) -> int:
+    from githotmap.core.analysis import (
+        branch_activity,
+        commit_frequency,
+        file_ownership,
+        knowledge_islands,
+        top_contributors,
+    )
+
+    repo_path = args.repo_path
+
+    # ---- Top Contributors ----
+    print("=" * 60)
+    print(f"Top Contributors (churn 降序, top {args.top_n})")
+    print("-" * 60)
+    try:
+        contributors = top_contributors(repo_path, top_n=args.top_n, since=args.since)
+    except Exception as exc:
+        print(f"采集失败: {exc}", file=sys.stderr)
+        return 1
+    if contributors:
+        name_w = max(len(c.name) for c in contributors)
+        print(f"{'Author':<{name_w}} {'Commits':>8} {'Added':>8} {'Deleted':>8} {'Churn':>8}")
+        for c in contributors:
+            print(f"{c.name:<{name_w}} {c.commits:>8.0f} {c.total_added:>8} {c.total_deleted:>8} {c.churn:>8}")
+    else:
+        print("(无数据)")
+
+    # ---- Branch Activity ----
+    print("\n" + "=" * 60)
+    print("Branch Activity")
+    print("-" * 60)
+    try:
+        branches = branch_activity(repo_path)
+    except Exception as exc:
+        print(f"采集失败: {exc}", file=sys.stderr)
+        return 1
+    if branches:
+        for b in branches:
+            print(f"  {b.name:<20} commits={b.commit_count:>5}  last={b.last_commit_datetime.strftime('%Y-%m-%d')}  by {b.last_author}")
+            print(f"    {b.last_message[:80]}")
+    else:
+        print("(无数据)")
+
+    # ---- Knowledge Islands ----
+    print("\n" + "=" * 60)
+    print(f"Knowledge Islands (only 1 contributor, min churn={args.min_churn})")
+    print("-" * 60)
+    try:
+        islands = knowledge_islands(repo_path, min_churn=args.min_churn)
+    except Exception as exc:
+        print(f"采集失败: {exc}", file=sys.stderr)
+        return 1
+    if islands:
+        for o in islands:
+            churn = next(iter(o.contributors.values()))
+            print(f"  {o.file_path}  →  {o.dominant_author}  (churn={churn})")
+    else:
+        print("(无知识孤岛)")
+
+    # ---- Commit Frequency ----
+    print("\n" + "=" * 60)
+    print("Commit Frequency (by day)")
+    print("-" * 60)
+    try:
+        freq = commit_frequency(repo_path, group_by="day", since=args.since)
+    except Exception as exc:
+        print(f"采集失败: {exc}", file=sys.stderr)
+        return 1
+    if freq.counts:
+        print(f"  Total: {freq.total_commits} commits")
+        for day, count in sorted(freq.counts.items(), reverse=True)[:14]:
+            print(f"    {day}: {count}")
+    else:
+        print("(无数据)")
+
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -105,6 +197,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "analyze":
         return _run_analyze(args)
+    if args.command == "history":
+        return _run_history(args)
     parser.print_help()
     return 0
 

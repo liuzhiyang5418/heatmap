@@ -1,4 +1,10 @@
-"""核心引擎包：领域模型、采集、指标、评分、排序与流水线。"""
+"""核心引擎包：领域模型、采集、指标、评分、排序与流水线。
+
+注意：``pipeline`` 是编排层，依赖 ``config`` 包，因此**不在本模块中 eager import**，
+否则会与 ``config.config`` 形成循环。使用时请显式导入::
+
+    from githotmap.core.pipeline import AnalysisPipeline
+"""
 
 from __future__ import annotations
 
@@ -12,10 +18,8 @@ from githotmap.core.models import (
     FolderResult,
     ScoringMode,
 )
-from githotmap.core.pipeline import AnalysisPipeline
 
 __all__ = [
-    "AnalysisPipeline",
     "AnalysisResult",
     "BreakdownKey",
     "CompositeMode",
