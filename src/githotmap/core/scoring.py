@@ -250,9 +250,37 @@ def _normalize_blend(blend: list[tuple[ScoringMode, float]]) -> dict[ScoringMode
     return {m: w / total for m, w in weights.items()}
 
 
+def _composite_reasoning(
+    file_result: FileResult, composite: CompositeMode, blend: list[tuple[ScoringMode, float]]
+) -> list[str]:
+    """为复合模式生成理由：标注配比，并汇总各组成基础模式的理由。
+
+    理由按组成模式的权重从高到低拼接；模式名以 ``hot``/``risk`` 等原文呈现，
+    便于与渲染层的模式切换器对应。若无任何组成模式产出理由，则回退为一条
+    总体说明，保证渲染层始终有内容可显示。
+    """
+    weights = _normalize_blend(blend)
+    header = "Composite Score: " + " + ".join(
+        f"{base.value} {weight:.0%}" for base, weight in weights.items()
+    )
+    reasons: list[str] = [header]
+    for base, weight in sorted(weights.items(), key=lambda item: item[1], reverse=True):
+        if weight <= 0:
+            continue
+        for reason in file_result.reasoning.get(base.value, []):
+            reasons.append(f"[{base.value}] {reason}")
+    if len(reasons) == 1:
+        reasons.append(f"复合模式 {composite.value} 的各组成信号均未超过显著性阈值。")
+    return reasons
+
+
 def apply_composite(file_result: FileResult, composite: CompositeMode, blend) -> None:
-    """把复合分数写回 ``file_result``（以复合模式名为键），并设为当前排序分数。"""
+    """把复合分数写回 ``file_result``（以复合模式名为键），并设为当前排序分数。
+
+    同时写入融合后的分解与理由，保证复合模式与基础模式在渲染层有完整对称的输出。
+    """
     score, breakdown = compute_composite_score(file_result, composite, blend)
     file_result.scores[composite.value] = score
     file_result.breakdowns[composite.value] = breakdown
+    file_result.reasoning[composite.value] = _composite_reasoning(file_result, composite, blend)
     file_result.mode_score = score
