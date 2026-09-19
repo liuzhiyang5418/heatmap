@@ -17,14 +17,25 @@ from dataclasses import dataclass
 from githotmap.core.metrics import clamp
 from githotmap.core.models import BreakdownKey, CompositeMode, FileMetrics, FileResult, ScoringMode
 
-# 归一化上限：超过该值即饱和。
-_MAX_CONTRIB = 20.0
-_MAX_COMMITS = 500.0
-_MAX_SIZE_KB = 500.0
-_MAX_AGE_DAYS = 3650.0
-_MAX_CHURN = 5000.0
-_MAX_RECENT = 50.0
-_MAX_LOC = 10000.0
+# 归一化上限默认值：超过该值即饱和。可通过 compute_score 的 ``caps`` 参数按仓库规模覆盖
+#（例如大型仓库可调高 _MAX_COMMITS / _MAX_CHURN，避免大量文件同时饱和失去区分度）。
+DEFAULT_CAPS: dict[str, float] = {
+    "contrib": 20.0,
+    "commits": 500.0,
+    "size_kb": 500.0,
+    "age_days": 3650.0,
+    "churn": 5000.0,
+    "recent": 50.0,
+    "loc": 10000.0,
+}
+
+# 风险等级阈值（分，含下限）：分数 -> critical/high/medium/low。
+SEVERITY_THRESHOLDS: tuple[tuple[float, str], ...] = (
+    (75.0, "critical"),
+    (50.0, "high"),
+    (25.0, "medium"),
+    (0.0, "low"),
+)
 
 # 近因信号的提交/改动权重：提交权重更高，避免单次大规模重排格式提交过度抬升信号。
 _COMMIT_RECENCY_WEIGHT = 0.7
@@ -47,6 +58,26 @@ class ScoreResult:
     breakdown: dict[BreakdownKey, float]  # 各信号的百分比贡献
     reasoning: list[str]
     recency_signal: float
+    severity: str = "low"  # critical / high / medium / low，见 score_grade()
+
+
+def score_grade(score: float) -> str:
+    """把 0–100 分映射为风险等级：critical / high / medium / low。"""
+    for threshold, label in SEVERITY_THRESHOLDS:
+        if score >= threshold:
+            return label
+    return "low"
+
+
+def _normalize_weights(weights: dict[BreakdownKey, float]) -> dict[BreakdownKey, float]:
+    """把模式权重归一化到和为 1，保证分数稳定在 0–100 语义。
+
+    权重为空或总和非法（<=0）时原样返回，由调用方决定如何处理（此时得分趋近 0）。
+    """
+    total = sum(w for w in weights.values() if w > 0)
+    if total <= 0:
+        return weights
+    return {key: max(w, 0.0) / total for key, w in weights.items()}
 
 
 def compute_recency_signal(metrics: FileMetrics) -> float:
@@ -62,23 +93,31 @@ def compute_score(
     weights: dict[BreakdownKey, float],
     threshold_low: float,
     threshold_high: float,
+    caps: dict[str, float] | None = None,
 ) -> ScoreResult:
-    """计算单文件在指定模式下的分数、分解与理由。"""
+    """计算单文件在指定模式下的分数、分解与理由。
+
+    ``caps`` 可覆盖 :data:`DEFAULT_CAPS` 中的归一化上限（缺省键回退默认值）。
+    权重内部会归一化到和为 1，因此自定义权重无需手工配平。
+    """
     if metrics.size_bytes == 0:
         return ScoreResult(0.0, {}, [], 0.0)
 
+    c = {**DEFAULT_CAPS, **(caps or {})}
+    weights = _normalize_weights(weights)
+
     # ---- 归一化指标 [0,1] ----
-    n_contrib = clamp(metrics.unique_contributors / _MAX_CONTRIB)
-    n_commits = clamp(metrics.commits / _MAX_COMMITS)
-    n_size = clamp((metrics.size_bytes / 1024.0) / _MAX_SIZE_KB)
-    n_age = clamp(math.log1p(metrics.age_days) / math.log1p(_MAX_AGE_DAYS))
-    n_churn = clamp(metrics.churn / _MAX_CHURN)
-    n_loc = clamp(metrics.lines_of_code / _MAX_LOC)
-    n_decayed_commits = clamp(metrics.decayed_commits / _MAX_COMMITS)
-    n_decayed_churn = clamp(metrics.decayed_churn / _MAX_CHURN)
+    n_contrib = clamp(metrics.unique_contributors / c["contrib"])
+    n_commits = clamp(metrics.commits / c["commits"])
+    n_size = clamp((metrics.size_bytes / 1024.0) / c["size_kb"])
+    n_age = clamp(math.log1p(metrics.age_days) / math.log1p(c["age_days"]))
+    n_churn = clamp(metrics.churn / c["churn"])
+    n_loc = clamp(metrics.lines_of_code / c["loc"])
+    n_decayed_commits = clamp(metrics.decayed_commits / c["commits"])
+    n_decayed_churn = clamp(metrics.decayed_churn / c["churn"])
     n_gini = clamp(metrics.gini)
     n_inv_contrib = clamp(1.0 - n_contrib)
-    n_recent_commits = clamp(metrics.recent_commits / _MAX_RECENT)
+    n_recent_commits = clamp(metrics.recent_commits / c["recent"])
     n_low_recent = clamp(1.0 - n_recent_commits)
 
     recency_signal = compute_recency_signal(metrics)
@@ -127,10 +166,13 @@ def compute_score(
         score *= 0.50
 
     breakdown = {key: value * 100.0 for key, value in norm.items() if weights.get(key, 0.0) != 0}
+    severity = score_grade(score)
     reasoning = _compute_reasoning(
         breakdown, mode, recency_signal, threshold_low, threshold_high
     )
-    return ScoreResult(score, breakdown, reasoning, recency_signal)
+    if severity in ("critical", "high"):
+        reasoning.insert(0, f"Severity: {severity}（{score:.0f} 分），建议优先处理。")
+    return ScoreResult(score, breakdown, reasoning, recency_signal, severity)
 
 
 def _compute_reasoning(
@@ -197,6 +239,7 @@ def score_file(metrics: FileMetrics, mode: ScoringMode, config) -> FileResult:
     result.recency_threshold_low = config.recency_threshold_low
     result.recency_threshold_high = config.recency_threshold_high
 
+    caps = getattr(config, "normalization_caps", None)
     for base in _BASE_MODES:
         sr = compute_score(
             metrics,
@@ -204,10 +247,12 @@ def score_file(metrics: FileMetrics, mode: ScoringMode, config) -> FileResult:
             config.weights_for(base),
             config.recency_threshold_low,
             config.recency_threshold_high,
+            caps=caps,
         )
         result.scores[base.value] = sr.score
         result.breakdowns[base.value] = {k.value: v for k, v in sr.breakdown.items()}
         result.reasoning[base.value] = sr.reasoning
+        result.severities[base.value] = sr.severity
         result.recency_signal = sr.recency_signal
 
     result.mode_score = result.scores.get(mode.value, 0.0)
@@ -283,4 +328,5 @@ def apply_composite(file_result: FileResult, composite: CompositeMode, blend) ->
     file_result.scores[composite.value] = score
     file_result.breakdowns[composite.value] = breakdown
     file_result.reasoning[composite.value] = _composite_reasoning(file_result, composite, blend)
+    file_result.severities[composite.value] = score_grade(score)
     file_result.mode_score = score
