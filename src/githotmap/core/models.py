@@ -93,6 +93,8 @@ class FileResult:
     breakdowns: dict[str, dict[str, float]] = field(default_factory=dict)
     # mode 名称(str) -> 自然语言理由列表
     reasoning: dict[str, list[str]] = field(default_factory=dict)
+    # mode 名称(str) -> 风险等级（critical/high/medium/low）
+    severities: dict[str, str] = field(default_factory=dict)
     # 当前活动评分模式的分数（排序依据）。
     mode_score: float = 0.0
 
@@ -139,6 +141,7 @@ class FileResult:
             "scores": self.scores,
             "breakdowns": self.breakdowns,
             "reasoning": self.reasoning,
+            "severities": self.severities,
             "mode_score": self.mode_score,
         }
 

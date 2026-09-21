@@ -88,6 +88,8 @@ class ScoringConfig:
     recency_threshold_high: float = 0.40
     recent_window_days: float = DEFAULT_RECENT_WINDOW_DAYS
     decay_half_life_days: float = DECAY_HALF_LIFE_DAYS
+    # 归一化上限覆盖（键见 scoring.DEFAULT_CAPS），用于按仓库规模调整饱和点。
+    normalization_caps: dict[str, float] = field(default_factory=dict)
     exclude: list[str] = field(default_factory=list)
     since: str | None = None
 
