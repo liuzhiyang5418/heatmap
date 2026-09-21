@@ -363,11 +363,23 @@ def scan_repository(
 ```python
 scan = scan_repository(repo_path)
 for path in scan.paths():                 # 已排序、已排除噪声
-    source = (Path(scan.root) / path).read_text(encoding="utf-8", errors="replace")
+    # 必须用 path_base 拼接，不能用 root —— 见下方警告
+    source = (Path(scan.path_base) / path).read_text(encoding="utf-8", errors="replace")
     ...                                    # 你的正则逻辑
 ```
 
+> ⚠️ **勘误（v0.1.3）**：本节示例此前写的是 `Path(scan.root) / path`，**这是错的**。
+> `paths()` 是相对于 `path_base`（Git 工作区根）的，而 `root` 是本次扫描传入的目录。
+> 当扫描的是仓库**子目录**时二者不同，用 `root` 拼接会得到 `.../src/src/...` 这类不存在的路径。
+> 实测：扫描 `<repo>/src` 时 `root=<repo>/src`、`path_base=<repo>`、`paths()[0]="src/githotmap/__init__.py"`，
+> `path_base` 拼接命中真实文件，`root` 拼接则不存在。
+> 正确拼接基准**始终**是 `path_base`；扫描仓库根时二者恰好相等，因此这个错误只在子目录场景暴露。
+
 - 请用 `scan.paths()` 作为输入面，不要自己 `os.walk`——否则排除规则会与全局不一致；
+- 读源码请**同时**用 `scan.parsed`/`limitations` 判断该文件是否值得读，并对单文件读取失败做降级处理
+  （见 §4.3：一个文件读不动不能让整次检测挂掉）；
+- 编码建议遵循 §4.3：优先 `tokenize.open()` 以尊重 PEP 263 的 `coding` 声明，而不是固定 `utf-8`，
+  否则带 `# -*- coding: gbk -*-` 的文件会被读成乱码、造成漏报；
 - 你的输出请以**同样的路径规范**建键，并在一个 TODO 上附加 `path` 与 `lineno`。
 
 ### 7.2 给 Member 4（Git History Analyzer）
@@ -499,3 +511,4 @@ CS5351 要求每项非功能需求都要有架构设计方案与理由。扫描�
 | v0.1 | Sprint 1 | 初稿：定义路径规范、5 个数据结构、公共 API、下游接入约定 | Member 2 |
 | v0.1.1 | Sprint 1 | 依实现回填：`parsed` 字段、行数粒度差异、符号链接语义、类符号复杂度为 0、复合语句内定义、`excluded_dirs` 形态、实现状态与既有问题基线 | Member 2 |
 | v0.1.2 | Sprint 1 | 依 PR #2 更新：M4 的 GitPython 依赖声明冲突已解决（§7.2、§11）；§12.2 补注测量基准 | Member 2 |
+| v0.1.3 | Sprint 1 | **勘误**：§7.1 示例的拼接基准由 `scan.root` 改为 `scan.path_base`（扫描仓库子目录时前者会得到不存在的路径）；补充单文件读取降级与 PEP 263 编码两条接入要求 | Member 2 |
