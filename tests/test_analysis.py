@@ -124,9 +124,12 @@ def test_top_contributors_since_filter(sample_repo: Path) -> None:
 
 
 def test_top_contributors_since_boundary_day_is_inclusive(sample_repo: Path) -> None:
-    # git 的 --since 对裸日期按本地时区的当天 00:00 解释，语义含当天：
-    # alice 09-20 10:00(UTC) 的提交应当被包含。
-    result = top_contributors(sample_repo, since="2026-09-20")
+    # 必须用显式时间戳，不能用裸日期。
+    # git 对 "2026-09-20" 这类裸日期会用**当前时刻的时分秒**（本地时区）补齐时间部分，
+    # 而不是当天 00:00 —— 实测（本机 19:29 +0800）该阈值落在 09-20 11:29 UTC，
+    # 于是 alice 的 10:00 UTC 提交被排除。用裸日期会让本用例随一天中的时刻与
+    # 机器时区而变（本地 18:00 之后必失败），故显式写成 UTC 零点。
+    result = top_contributors(sample_repo, since="2026-09-20T00:00:00Z")
     assert len(result) == 1
     assert result[0].name == "alice"
     assert result[0].commits == 1
