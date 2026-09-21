@@ -32,8 +32,12 @@ class TodoDetector:
         """
         todos = []
         for path in scan.paths():
-            # 用扫描器的基准目录拼接出真实文件路径后读取源码。
-            source = (Path(scan.root) / path).read_text(encoding="utf-8", errors="replace")
+            # scan.paths() 是相对 path_base（Git 工作区根）的，不能拿 scan.root 拼接：
+            # 当扫描的是仓库子目录时 root != path_base，会拼出 …/子目录/子目录/… 的不存在路径。
+            # 见 docs/scanner-interface.md §4.1 与 §7.1。
+            source = (Path(scan.path_base) / path).read_text(
+                encoding="utf-8", errors="replace"
+            )
             todos.extend(iter_todos(path, source))
 
         # 确定性排序（接口文档 §4.2），保证同样输入得到逐字节相同输出。
