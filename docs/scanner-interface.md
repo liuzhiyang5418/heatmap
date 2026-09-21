@@ -92,10 +92,25 @@
 | 大小写 | 保留文件系统原始大小写 |
 | 示例 | `src/githotmap/core/git.py` ✅ ／ `./src\githotmap\core\git.py` ❌ |
 
-**为什么钉死这一条**：`git log --numstat` 输出的就是仓库根相对路径（见 `core/git.py` 的 `GitLogParser`）。若扫描器按传入目录相对化，当用户传入仓库子目录时，M2 与 M4 的键会**静默错配**，所有文件的历史指标退化为 0。扫描器默认开启 `respect_git_root=True` 来消除该风险。
+**为什么钉死这一条**：`git log --numstat` 输出的就是仓库根相对路径。若扫描器按传入目录相对化，当用户传入仓库子目录时，M2 与 M4 的键会**静默错配**，所有文件的历史指标退化为 0。扫描器默认开启 `respect_git_root=True` 来消除该风险。
 
 - 不含 Git 仓库时（普通文件夹），基准目录回退为传入的扫描根目录。
 - 扫描器会把实际使用的基准目录写入 `RepositoryScan.path_base`，便于排查。
+
+> ⚠️ **非 ASCII 路径的陷阱（v0.1.4 新增）**：git 的 `core.quotepath` **默认为 `true`**，
+> 会把非 ASCII 路径输出成「引号 + C 风格八进制转义」。实测（文件名 `中文模块.py`）：
+>
+> | 来源 | 得到的键 |
+> |------|----------|
+> | `commit.stats.files` / `git log --numstat`（默认 quotepath） | `'"\344\270\255\346\226\207\346\250\241\345\235\227.py"'` |
+> | 同上，但加 `-c core.quotepath=false` | `'中文模块.py'` ✅ |
+> | 扫描器（读文件系统，`as_posix()`） | `'中文模块.py'` ✅ |
+>
+> 两者**交集为空**，字典 join 会静默失败、历史指标全部丢失（不是报错，而是悄悄算成 0）。
+> 因此**从 git 读取路径的一方（M4）必须显式关闭 quotepath**，例如以
+> `git -c core.quotepath=false log --numstat …` 调用，或对取值做八进制反转义；
+> 只含 ASCII 与空格的文件名不受影响（空格不会触发转义，已实测）。
+> 上表「与 `git log --numstat` 对齐」的表述，严格说是指 **`core.quotepath=false` 时的对齐**。
 
 ### 4.2 确定性【契约】
 
@@ -512,3 +527,4 @@ CS5351 要求每项非功能需求都要有架构设计方案与理由。扫描�
 | v0.1.1 | Sprint 1 | 依实现回填：`parsed` 字段、行数粒度差异、符号链接语义、类符号复杂度为 0、复合语句内定义、`excluded_dirs` 形态、实现状态与既有问题基线 | Member 2 |
 | v0.1.2 | Sprint 1 | 依 PR #2 更新：M4 的 GitPython 依赖声明冲突已解决（§7.2、§11）；§12.2 补注测量基准 | Member 2 |
 | v0.1.3 | Sprint 1 | **勘误**：§7.1 示例的拼接基准由 `scan.root` 改为 `scan.path_base`（扫描仓库子目录时前者会得到不存在的路径）；补充单文件读取降级与 PEP 263 编码两条接入要求 | Member 2 |
+| v0.1.4 | Sprint 1 | §4.1 新增**非 ASCII 路径陷阱**：git `core.quotepath` 默认转义路径，会使 M4 与 M2 的键交集为空、历史指标静默丢失；M4 侧须关闭 quotepath | Member 2 |
