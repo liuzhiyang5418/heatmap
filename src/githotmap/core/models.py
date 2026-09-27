@@ -41,6 +41,11 @@ class BreakdownKey(str, Enum):
     INV_CONTRIB = "inv_contrib"
     LOC = "loc"
     LOW_RECENT = "low_recent"
+    # 结构信号（来自 scanner 模块的 AST 解析）
+    CC = "cc"                          # 最大圈复杂度
+    NESTING = "nesting"                # 最大嵌套深度
+    SYMBOLS = "symbols"                # 符号数量（类+函数）
+    IMPORTS = "imports"                # 导入数量
 
 
 @dataclass(slots=True)
@@ -61,6 +66,11 @@ class FileMetrics:
     decayed_churn: float = 0.0
     # 每位贡献者的提交次数，用于事后复算 Gini / 调试。
     contributor_commits: dict[str, float] = field(default_factory=dict)
+    # 结构信号（由 scanner 模块注入，非 Python 文件或解析失败时保持 0）
+    max_cyclomatic_complexity: float = 0.0
+    max_nesting_depth: float = 0.0
+    symbol_count: float = 0.0
+    import_count: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +86,10 @@ class FileMetrics:
             "gini": self.gini,
             "decayed_commits": self.decayed_commits,
             "decayed_churn": self.decayed_churn,
+            "max_cyclomatic_complexity": self.max_cyclomatic_complexity,
+            "max_nesting_depth": self.max_nesting_depth,
+            "symbol_count": self.symbol_count,
+            "import_count": self.import_count,
         }
 
 
