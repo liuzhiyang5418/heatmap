@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from githotmap.scanner import RepositoryScan
-from githotmap.todo.models import TodoScan
+from githotmap.todo.models import TodoItem, TodoScan
 from githotmap.todo.parser import iter_todos
 
 
@@ -30,7 +30,7 @@ class TodoDetector:
         返回:
             :class:`TodoScan`，条目已按 ``(path, lineno, column)`` 升序排序。
         """
-        todos = []
+        todos: list[TodoItem] = []
         for path in scan.paths():
             # 用扫描器的基准目录拼接出真实文件路径后读取源码。
             source = (Path(scan.root) / path).read_text(encoding="utf-8", errors="replace")

@@ -73,3 +73,19 @@ def test_syntax_error_source():
     todos = list(iter_todos("a.py", "def broken(:\n# TODO: keep\n"))
     assert isinstance(todos, list)
     assert any(t.kind.value == "TODO" for t in todos)
+
+
+def test_string_with_inline_comment():
+    """行内有字符串 TODO 但行尾注释没有 TODO 时，不应误判。"""
+    code = 'msg = "TODO: not a comment"  # regular comment\n'
+    todos = list(iter_todos("a.py", code))
+    assert len(todos) == 0
+
+
+def test_string_and_inline_todo_comment():
+    """行内有字符串 TODO 且行尾注释也有 TODO 时，只提取注释里的 TODO。"""
+    code = 'msg = "TODO: not a comment"  # TODO: real comment\n'
+    todos = list(iter_todos("a.py", code))
+    assert len(todos) == 1
+    assert todos[0].kind.value == "TODO"
+    assert todos[0].description == "real comment"

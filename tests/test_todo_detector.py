@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from githotmap.scanner import FileStructure, RepositoryScan
 from githotmap.todo.detector import TodoDetector
 
