@@ -27,6 +27,11 @@ DEFAULT_CAPS: dict[str, float] = {
     "churn": 5000.0,
     "recent": 50.0,
     "loc": 10000.0,
+    # 结构信号归一化上限（scanner 产出）
+    "cc": 20.0,
+    "nesting": 10.0,
+    "symbols": 50.0,
+    "imports": 30.0,
 }
 
 # 风险等级阈值（分，含下限）：分数 -> critical/high/medium/low。
@@ -120,6 +125,12 @@ def compute_score(
     n_recent_commits = clamp(metrics.recent_commits / c["recent"])
     n_low_recent = clamp(1.0 - n_recent_commits)
 
+    # 结构信号归一化 [0,1]
+    n_cc = clamp(metrics.max_cyclomatic_complexity / c["cc"])
+    n_nesting = clamp(metrics.max_nesting_depth / c["nesting"])
+    n_symbols = clamp(metrics.symbol_count / c["symbols"])
+    n_imports = clamp(metrics.import_count / c["imports"])
+
     recency_signal = compute_recency_signal(metrics)
 
     # ---- 模式选择提交/改动指标：hot/roi 采用衰减后的近期量 ----
@@ -148,7 +159,15 @@ def compute_score(
             }
         )
     elif mode == ScoringMode.COMPLEXITY:
-        norm.update({BreakdownKey.LOC: n_loc, BreakdownKey.LOW_RECENT: n_low_recent})
+        norm.update(
+            {
+                BreakdownKey.LOC: n_loc,
+                BreakdownKey.CC: n_cc,
+                BreakdownKey.NESTING: n_nesting,
+                BreakdownKey.SYMBOLS: n_symbols,
+                BreakdownKey.IMPORTS: n_imports,
+            }
+        )
     elif mode == ScoringMode.ROI:
         norm.update({BreakdownKey.GINI: n_gini, BreakdownKey.LOC: n_loc})
 
@@ -193,6 +212,20 @@ def _compute_reasoning(
     loc = b.get(BreakdownKey.LOC, 0.0)
     churn = b.get(BreakdownKey.CHURN, 0.0)
     inv_contrib = b.get(BreakdownKey.INV_CONTRIB, 0.0)
+    cc = b.get(BreakdownKey.CC, 0.0)
+    nesting = b.get(BreakdownKey.NESTING, 0.0)
+    symbols = b.get(BreakdownKey.SYMBOLS, 0.0)
+    imports = b.get(BreakdownKey.IMPORTS, 0.0)
+
+    # 结构信号主导的复合理由
+    if cc > significant and churn > significant:
+        results.append(
+            "Tangled Hotspot: 高圈复杂度 + 高改动频率，是重构最高优先级目标。"
+        )
+    if nesting > dominant:
+        results.append("Deep Nesting: 嵌套层级过深，认知负荷极高。")
+    if symbols > significant and imports > significant:
+        results.append("Broad Surface: 符号与导入过多，职责边界模糊。")
 
     if gini > significant and age > significant and low_recent > significant:
         results.append(
@@ -216,6 +249,12 @@ def _compute_reasoning(
             results.append("Knowledge Decay: 文件久未更新，机构性遗忘风险上升。")
         if loc > significant:
             results.append("Structural Complexity: 高代码行数增加维护者的认知负担。")
+        if cc > significant:
+            results.append("Cyclomatic Load: 分支逻辑复杂，测试与维护成本高。")
+        if nesting > significant:
+            results.append("Nested Logic: 嵌套层级偏高，阅读与调试难度大。")
+        if symbols > significant:
+            results.append("Symbol Overload: 符号数量多，文件职责可能过重。")
 
     if mode == ScoringMode.ROI:
         if churn > significant and loc > significant:

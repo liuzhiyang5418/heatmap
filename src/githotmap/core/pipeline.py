@@ -17,6 +17,7 @@ from githotmap.core.models import (
 )
 from githotmap.core.ranking import aggregate_folders, rank_files, rank_folders
 from githotmap.core.scoring import apply_composite, score_file
+from githotmap.scanner import ScanConfig, scan_repository
 
 
 def _resolve_mode(mode: str | ScoringMode | CompositeMode) -> tuple[ScoringMode | None, CompositeMode | None]:
@@ -80,6 +81,22 @@ class AnalysisPipeline:
             decay_half_life_days=cfg.decay_half_life_days,
         )
         enrich_worktree_attributes(metrics_map, repo_path)
+
+        # 2.5 结构信号补充：打通 scanner 产出，以路径做字典 join。
+        scan_cfg = ScanConfig(exclude_patterns=list(cfg.exclude))
+        try:
+            scan = scan_repository(repo_path, config=scan_cfg)
+            struct_by_path = scan.by_path()
+            for path, m in metrics_map.items():
+                struct = struct_by_path.get(path)
+                if struct is not None:
+                    m.max_cyclomatic_complexity = float(struct.max_cyclomatic_complexity)
+                    m.max_nesting_depth = float(struct.max_nesting_depth)
+                    m.symbol_count = float(struct.symbol_count)
+                    m.import_count = float(len(struct.imports))
+        except Exception:
+            # scanner 失败不阻断主流程：结构信号回退为默认值 0
+            pass
 
         # 3. 排除规则过滤。
         if cfg.exclude:
