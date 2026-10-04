@@ -46,6 +46,8 @@ class BreakdownKey(str, Enum):
     NESTING = "nesting"                # 最大嵌套深度
     SYMBOLS = "symbols"                # 符号数量（类+函数）
     IMPORTS = "imports"                # 导入数量
+    # SATD 信号（来自 todo 模块的注释检测）
+    TODO_DENSITY = "todo_density"      # TODO/FIXME/HACK/XXX 密度（按 LOC 归一化）
 
 
 @dataclass(slots=True)
@@ -71,6 +73,8 @@ class FileMetrics:
     max_nesting_depth: float = 0.0
     symbol_count: float = 0.0
     import_count: float = 0.0
+    # SATD 信号（由 todo 模块注入）
+    todo_count: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +94,7 @@ class FileMetrics:
             "max_nesting_depth": self.max_nesting_depth,
             "symbol_count": self.symbol_count,
             "import_count": self.import_count,
+            "todo_count": self.todo_count,
         }
 
 

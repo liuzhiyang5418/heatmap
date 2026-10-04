@@ -30,13 +30,14 @@ DEFAULT_WEIGHTS: dict[ScoringMode, dict[BreakdownKey, float]] = {
         BreakdownKey.CHURN: 0.05,
     },
     ScoringMode.COMPLEXITY: {
-        BreakdownKey.CC: 0.25,
+        BreakdownKey.CC: 0.20,
         BreakdownKey.NESTING: 0.15,
         BreakdownKey.SYMBOLS: 0.10,
         BreakdownKey.LOC: 0.15,
         BreakdownKey.CHURN: 0.20,
         BreakdownKey.AGE: 0.10,
         BreakdownKey.COMMITS: 0.05,
+        BreakdownKey.TODO_DENSITY: 0.05,
     },
     ScoringMode.ROI: {
         BreakdownKey.CHURN: 0.35,

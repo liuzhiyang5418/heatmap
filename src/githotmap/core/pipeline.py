@@ -18,6 +18,7 @@ from githotmap.core.models import (
 from githotmap.core.ranking import aggregate_folders, rank_files, rank_folders
 from githotmap.core.scoring import apply_composite, score_file
 from githotmap.scanner import ScanConfig, scan_repository
+from githotmap.todo import TodoDetector
 
 
 def _resolve_mode(mode: str | ScoringMode | CompositeMode) -> tuple[ScoringMode | None, CompositeMode | None]:
@@ -96,6 +97,18 @@ class AnalysisPipeline:
                     m.import_count = float(len(struct.imports))
         except Exception:
             # scanner 失败不阻断主流程：结构信号回退为默认值 0
+            pass
+
+        # 2.6 SATD 信号补充：打通 todo 模块产出，以路径做字典 join。
+        try:
+            todo_scan = TodoDetector().detect(scan)
+            todo_by_path: dict[str, int] = {}
+            for item in todo_scan.todos:
+                todo_by_path[item.path] = todo_by_path.get(item.path, 0) + 1
+            for path, m in metrics_map.items():
+                m.todo_count = float(todo_by_path.get(path, 0))
+        except Exception:
+            # todo 检测失败不阻断主流程：SATD 信号回退为默认值 0
             pass
 
         # 3. 排除规则过滤。

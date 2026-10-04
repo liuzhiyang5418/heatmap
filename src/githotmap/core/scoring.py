@@ -32,6 +32,8 @@ DEFAULT_CAPS: dict[str, float] = {
     "nesting": 10.0,
     "symbols": 50.0,
     "imports": 30.0,
+    # SATD 信号归一化上限：每 1000 行代码中的标记数
+    "todo_density": 10.0,
 }
 
 # 风险等级阈值（分，含下限）：分数 -> critical/high/medium/low。
@@ -131,6 +133,13 @@ def compute_score(
     n_symbols = clamp(metrics.symbol_count / c["symbols"])
     n_imports = clamp(metrics.import_count / c["imports"])
 
+    # SATD 信号：按 LOC 归一化的标记密度（每 1000 行）
+    todo_per_1k = (
+        (metrics.todo_count / metrics.lines_of_code * 1000.0)
+        if metrics.lines_of_code > 0 else 0.0
+    )
+    n_todo_density = clamp(todo_per_1k / c["todo_density"])
+
     recency_signal = compute_recency_signal(metrics)
 
     # ---- 模式选择提交/改动指标：hot/roi 采用衰减后的近期量 ----
@@ -166,6 +175,7 @@ def compute_score(
                 BreakdownKey.NESTING: n_nesting,
                 BreakdownKey.SYMBOLS: n_symbols,
                 BreakdownKey.IMPORTS: n_imports,
+                BreakdownKey.TODO_DENSITY: n_todo_density,
             }
         )
     elif mode == ScoringMode.ROI:
@@ -216,6 +226,7 @@ def _compute_reasoning(
     nesting = b.get(BreakdownKey.NESTING, 0.0)
     symbols = b.get(BreakdownKey.SYMBOLS, 0.0)
     imports = b.get(BreakdownKey.IMPORTS, 0.0)
+    todo_density = b.get(BreakdownKey.TODO_DENSITY, 0.0)
 
     # 结构信号主导的复合理由
     if cc > significant and churn > significant:
@@ -235,6 +246,13 @@ def _compute_reasoning(
         results.append("Volatile Anchor: 大模块频繁大幅改动，重构回报高。")
     if gini > dominant or inv_contrib > dominant:
         results.append("Knowledge Silo: 文件所有权过度集中在少数人手中。")
+
+    # SATD 理由（候选 ≠ 确诊措辞纪律）
+    if todo_density > significant:
+        results.append(
+            "SATD Candidate: 文件中存在显式技术债标记（TODO/FIXME/HACK/XXX），"
+            "可作为潜在重构候选，但需人工确认是否真实遗留问题。"
+        )
 
     if len(results) < 2:
         if churn > significant:
