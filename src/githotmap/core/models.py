@@ -116,6 +116,10 @@ class FileResult:
     severities: dict[str, str] = field(default_factory=dict)
     # 当前活动评分模式的分数（排序依据）。
     mode_score: float = 0.0
+    # 数据状态：ok / missing / low_confidence
+    status: str = "ok"
+    # 评分置信度 [0,1]：1.0 为完全可信，低样本或缺失数据时降低。
+    confidence: float = 1.0
 
     # ---- 便捷透传属性，避免调用方反复访问 metrics ----
     @property
@@ -162,6 +166,8 @@ class FileResult:
             "reasoning": self.reasoning,
             "severities": self.severities,
             "mode_score": self.mode_score,
+            "status": self.status,
+            "confidence": self.confidence,
         }
 
 
