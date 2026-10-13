@@ -77,6 +77,15 @@ PRESETS: dict[str, dict] = {
 }
 
 
+# 默认风险等级阈值（分数下限 -> 等级标签）
+DEFAULT_SEVERITY_THRESHOLDS: dict[str, float] = {
+    "critical": 75.0,
+    "high": 50.0,
+    "medium": 25.0,
+    "low": 0.0,
+}
+
+
 @dataclass(slots=True)
 class ScoringConfig:
     """一次分析运行的运行时参数（评分 + 采集 + 输出）。"""
@@ -92,6 +101,14 @@ class ScoringConfig:
     decay_half_life_days: float = DECAY_HALF_LIFE_DAYS
     # 归一化上限覆盖（键见 scoring.DEFAULT_CAPS），用于按仓库规模调整饱和点。
     normalization_caps: dict[str, float] = field(default_factory=dict)
+    # 是否启用基于仓库规模的自适应归一化上限（p90 统计）。
+    enable_adaptive_caps: bool = False
+    # 风险等级阈值（等级 -> 分数下限），可按仓库校准后冻结。
+    severity_thresholds: dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_SEVERITY_THRESHOLDS)
+    )
+    # 小样本门槛：提交数低于该值的文件置信度降级。
+    min_commits_for_confidence: float = 3.0
     exclude: list[str] = field(default_factory=list)
     since: str | None = None
 
