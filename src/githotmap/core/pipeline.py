@@ -117,26 +117,55 @@ class AnalysisPipeline:
                 path: m for path, m in metrics_map.items() if not _excluded(path, cfg.exclude)
             }
 
+        # 3.5 自适应归一化上限：按仓库内 p90 统计动态调整 caps，避免大仓库批量饱和。
+        caps_override: dict[str, float] = dict(cfg.normalization_caps)
+        if cfg.enable_adaptive_caps and metrics_map:
+            def _p90(values: list[float]) -> float:
+                if not values:
+                    return 1.0
+                s = sorted(values)
+                idx = int(len(s) * 0.90)
+                return max(s[idx], 1.0)
+
+            commits_vals = [m.commits for m in metrics_map.values()]
+            churn_vals = [m.churn for m in metrics_map.values()]
+            loc_vals = [m.lines_of_code for m in metrics_map.values()]
+            size_vals = [m.size_bytes / 1024.0 for m in metrics_map.values()]
+
+            caps_override.update({
+                "commits": _p90(commits_vals),
+                "churn": _p90(churn_vals),
+                "loc": _p90(loc_vals),
+                "size_kb": _p90(size_vals),
+            })
+
         # 4. 评分（始终计算全部基础模式）。
         #    复合模式需要一个基础模式作为初始 mode_score，随后被复合分数覆盖。
         seed_mode = base_mode if base_mode is not None else ScoringMode.HOT
+        # 将自适应 caps 注入 config 的临时副本（避免污染原始配置）
+        from dataclasses import replace
+        scoring_cfg = replace(cfg, normalization_caps=caps_override)
         files: list[FileResult] = [
-            score_file(m, seed_mode, cfg) for m in metrics_map.values()
+            score_file(m, seed_mode, scoring_cfg) for m in metrics_map.values()
         ]
+
+        # 4.1 若用户选择复合模式，重新计算并覆盖 mode_score。
         if composite is not None:
-            blend = COMPOSITE_WEIGHTS[composite]
+            weights = COMPOSITE_WEIGHTS.get(composite, [])
             for f in files:
-                apply_composite(f, composite, blend)
+                apply_composite(f, weights)
 
-        # 5. 排序与目录聚合。
-        ranked = rank_files(files, limit if limit is not None else cfg.limit)
-        folders = rank_folders(aggregate_folders(ranked))
+        # 5. 排序：按 mode_score 取前 N。
+        ranked_files = rank_files(files, limit=limit if limit is not None else cfg.limit)
 
-        active_mode = (composite.value if composite is not None else seed_mode.value)
+        # 6. 目录聚合。
+        folders = aggregate_folders(ranked_files)
+        ranked_folders = rank_folders(folders, limit=limit if limit is not None else cfg.limit)
+
         return AnalysisResult(
             repo_path=str(repo_path),
             repo_urn=resolve_urn(repo_path),
-            mode=active_mode,
-            files=ranked,
-            folders=folders,
+            mode=(composite.value if composite is not None else seed_mode.value),
+            files=ranked_files,
+            folders=ranked_folders,
         )

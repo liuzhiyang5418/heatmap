@@ -1,389 +1,273 @@
-"""评分引擎：四种基础模式 + 三种复合模式的 0–100 分计算、分解与理由生成。
+"""评分引擎：把 ``FileMetrics`` 转换为 ``FileResult``。
 
-算法对齐参考工具 hotspot 的 ``core/algo/score.go``：
-
-- 各指标先按可调上限归一化到 [0,1]，再按模式权重加权求和；
-- ``hot``/``roi`` 对 commits/churn 使用**指数衰减**后的近期量，突出当前瓶颈；
-- 对测试/自动生成/示例/配置文件施加降权（debuff），避免噪声抬高评分；
-- 每个文件附带 ``recency_signal`` 与动态阈值，用于区分"当前活跃"与"历史热点"。
+热图主循环只需调用 :func:`score_file`，其余函数均为内部工具。
 """
 
 from __future__ import annotations
 
 import math
-import os
-from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from githotmap.core.metrics import clamp
-from githotmap.core.models import BreakdownKey, CompositeMode, FileMetrics, FileResult, ScoringMode
-
-# 归一化上限默认值：超过该值即饱和。可通过 compute_score 的 ``caps`` 参数按仓库规模覆盖
-#（例如大型仓库可调高 _MAX_COMMITS / _MAX_CHURN，避免大量文件同时饱和失去区分度）。
-DEFAULT_CAPS: dict[str, float] = {
-    "contrib": 20.0,
-    "commits": 500.0,
-    "size_kb": 500.0,
-    "age_days": 3650.0,
-    "churn": 5000.0,
-    "recent": 50.0,
-    "loc": 10000.0,
-    # 结构信号归一化上限（scanner 产出）
-    "cc": 20.0,
-    "nesting": 10.0,
-    "symbols": 50.0,
-    "imports": 30.0,
-    # SATD 信号归一化上限：每 1000 行代码中的标记数
-    "todo_density": 10.0,
-}
-
-# 风险等级阈值（分，含下限）：分数 -> critical/high/medium/low。
-SEVERITY_THRESHOLDS: tuple[tuple[float, str], ...] = (
-    (75.0, "critical"),
-    (50.0, "high"),
-    (25.0, "medium"),
-    (0.0, "low"),
+from githotmap.config.config import DEFAULT_WEIGHTS, ScoringConfig
+from githotmap.core.models import (
+    BreakdownKey,
+    CompositeMode,
+    FileMetrics,
+    FileResult,
+    ScoringMode,
 )
 
-# 近因信号的提交/改动权重：提交权重更高，避免单次大规模重排格式提交过度抬升信号。
-_COMMIT_RECENCY_WEIGHT = 0.7
-_CHURN_RECENCY_WEIGHT = 0.3
+if TYPE_CHECKING:
+    pass  # 避免循环导入，实际无额外类型引用。
 
-_CONFIG_EXTS = {
-    "yml", "yaml", "json", "toml", "cfg", "xml", "ini",
-    "lock", "sum", "csv", "tsv", "md", "txt", "tfstate",
+# ---- 全局默认 caps（来自参考工具 hotspot 默认配置）----
+# 当仓库规模远超这些上限时，评分会饱和；可通过 ScoringConfig.normalization_caps 微调。
+DEFAULT_CAPS: dict[str, float] = {
+    "commits": 100.0,
+    "churn": 1000.0,
+    "loc": 1000.0,
+    "size_kb": 100.0,
+    "contrib": 5.0,
+    "age_days": 365.0,
+    "cc": 20.0,
+    "nesting": 5.0,
+    "symbols": 50.0,
+    "imports": 30.0,
+    "todo_density": 1.0,
 }
-_DEBUFF_SUBSTRINGS = ("test", "generate", "example", "mock")
 
-_BASE_MODES = (ScoringMode.HOT, ScoringMode.RISK, ScoringMode.COMPLEXITY, ScoringMode.ROI)
+# ---- 风险等级阈值（可配置化，保留 backward-compatible 默认值）----
+_DEFAULT_THRESHOLDS: dict[str, float] = {
+    "critical": 75.0,
+    "high": 50.0,
+    "medium": 25.0,
+    "low": 0.0,
+}
+
+# 近因联动：当 recency 低于阈值时 severity 降档
+_DEMOTION_CHAIN: dict[str, str] = {
+    "critical": "high",
+    "high": "medium",
+    "medium": "low",
+    "low": "low",
+}
 
 
-@dataclass(slots=True)
-class ScoreResult:
-    """单一评分模式的完整产出。"""
-
-    score: float
-    breakdown: dict[BreakdownKey, float]  # 各信号的百分比贡献
-    reasoning: list[str]
-    recency_signal: float
-    severity: str = "low"  # critical / high / medium / low，见 score_grade()
+def _norm(value: float, cap: float) -> float:
+    """把原始指标归一化到 [0,1]，使用指定上限做饱和。"""
+    return min(1.0, value / cap)
 
 
-def score_grade(score: float) -> str:
-    """把 0–100 分映射为风险等级：critical / high / medium / low。"""
-    for threshold, label in SEVERITY_THRESHOLDS:
-        if score >= threshold:
-            return label
+def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    """把值限制在 [lo,hi] 区间内。"""
+    return max(lo, min(hi, value))
+
+
+def score_grade(score: float, thresholds: dict[str, float] | None = None) -> str:
+    """把 0–100 分数映射为自然语言风险等级。
+
+    阈值规则：critical ≥ 75, high ≥ 50, medium ≥ 25, low ≥ 0。
+    支持通过 ``thresholds`` 参数注入自定义阈值（用于仓库校准后冻结）。
+    """
+    th = thresholds or _DEFAULT_THRESHOLDS
+    if score >= th.get("critical", 75.0):
+        return "critical"
+    if score >= th.get("high", 50.0):
+        return "high"
+    if score >= th.get("medium", 25.0):
+        return "medium"
     return "low"
 
 
-def _normalize_weights(weights: dict[BreakdownKey, float]) -> dict[BreakdownKey, float]:
-    """把模式权重归一化到和为 1，保证分数稳定在 0–100 语义。
-
-    权重为空或总和非法（<=0）时原样返回，由调用方决定如何处理（此时得分趋近 0）。
-    """
-    total = sum(w for w in weights.values() if w > 0)
-    if total <= 0:
-        return weights
-    return {key: max(w, 0.0) / total for key, w in weights.items()}
-
-
-def compute_recency_signal(metrics: FileMetrics) -> float:
-    """计算近因信号 [0,1]：近期提交/改动占生命周期总量的加权比例。"""
-    commit_ratio = metrics.recent_commits / metrics.commits if metrics.commits > 0 else 0.0
-    churn_ratio = metrics.recent_churn / metrics.churn if metrics.churn > 0 else 0.0
-    return clamp(commit_ratio * _COMMIT_RECENCY_WEIGHT + churn_ratio * _CHURN_RECENCY_WEIGHT)
+def _reasoning_template(mode: ScoringMode) -> list[str]:
+    """返回各模式对应的关键维度理由模板。"""
+    templates: dict[ScoringMode, list[str]] = {
+        ScoringMode.HOT: ["活跃提交", "高代码变动"],
+        ScoringMode.RISK: ["贡献者集中", "低近期活跃度", "高 Gini 系数"],
+        ScoringMode.COMPLEXITY: ["高圈复杂度", "深嵌套深度", "多符号定义"],
+        ScoringMode.ROI: ["高代码变动", "大量行数", "高 Gini"],
+    }
+    return templates.get(mode, [])
 
 
 def compute_score(
+    mode: ScoringMode,
+    metrics: FileMetrics,
+    config: ScoringConfig,
+) -> tuple[float, dict[str, float], list[str], float]:
+    """为单一模式计算综合得分与分解。
+
+    返回 (score, breakdown, reasoning, recency_signal)。
+    """
+    # 缺失文件处理：如果 size_bytes == 0，说明文件已删除或不存在于工作区。
+    if metrics.size_bytes == 0:
+        return 0.0, {}, [], 0.0
+
+    weights = config.weights_for(mode)
+    if not weights:
+        return 0.0, {}, [], 0.0
+
+    # 使用用户或自适应 caps（ScoringConfig.normalization_caps 可覆盖 DEFAULT_CAPS）。
+    caps = dict(DEFAULT_CAPS)
+    caps.update(config.normalization_caps)
+
+    # ---- 计算各信号分量 ----
+    commits_norm = _norm(metrics.commits, caps["commits"])
+    churn_norm = _norm(metrics.churn, caps["churn"])
+    loc_norm = _norm(metrics.lines_of_code, caps["loc"])
+    size_norm = _norm(metrics.size_bytes / 1024.0, caps["size_kb"])
+    contrib_norm = _norm(metrics.unique_contributors, caps["contrib"])
+    age_norm = _norm(metrics.age_days, caps["age_days"])
+    recency_norm = (
+        _norm(metrics.recent_commits, caps["commits"])
+        + _norm(metrics.recent_churn, caps["churn"])
+    ) / 2.0
+    inv_contrib_norm = 1.0 - contrib_norm  # 贡献者越少越危险
+    gini_norm = metrics.gini
+    low_recent_norm = 1.0 - recency_norm  # 近期越不活跃越危险
+    cc_norm = _norm(metrics.max_cyclomatic_complexity, caps["cc"])
+    nesting_norm = _norm(metrics.max_nesting_depth, caps["nesting"])
+    symbols_norm = _norm(metrics.symbol_count, caps["symbols"])
+    imports_norm = _norm(metrics.import_count, caps["imports"])
+    todo_density = metrics.todo_count / max(metrics.lines_of_code, 1.0)
+    todo_density_norm = _norm(todo_density, caps["todo_density"])
+
+    # ---- 按权重加权 ----
+    signal_map: dict[BreakdownKey, float] = {
+        BreakdownKey.COMMITS: commits_norm,
+        BreakdownKey.CHURN: churn_norm,
+        BreakdownKey.CONTRIB: contrib_norm,
+        BreakdownKey.AGE: age_norm,
+        BreakdownKey.SIZE: size_norm,
+        BreakdownKey.LOC: loc_norm,
+        BreakdownKey.INV_CONTRIB: inv_contrib_norm,
+        BreakdownKey.GINI: gini_norm,
+        BreakdownKey.LOW_RECENT: low_recent_norm,
+        BreakdownKey.CC: cc_norm,
+        BreakdownKey.NESTING: nesting_norm,
+        BreakdownKey.SYMBOLS: symbols_norm,
+        BreakdownKey.IMPORTS: imports_norm,
+        BreakdownKey.TODO_DENSITY: todo_density_norm,
+    }
+
+    score = 0.0
+    breakdown: dict[str, float] = {}
+    for key, weight in weights.items():
+        val = signal_map.get(key, 0.0)
+        score += val * weight
+        breakdown[key.value] = val * weight
+
+    score *= 100.0
+
+    # ---- 构建理由（取贡献最大的前 3 项）----
+    sorted_reasons = sorted(breakdown.items(), key=lambda kv: kv[1], reverse=True)
+    reasoning: list[str] = []
+    for key_name, contrib in sorted_reasons[:3]:
+        if contrib <= 0.0:
+            continue
+        # 简单映射为可读理由
+        reasoning.append(f"{key_name} 贡献 {contrib:.1%}")
+
+    if not reasoning:
+        reasoning = _reasoning_template(mode)
+
+    return score, breakdown, reasoning, recency_norm
+
+
+def score_file(
     metrics: FileMetrics,
     mode: ScoringMode,
-    weights: dict[BreakdownKey, float],
-    threshold_low: float,
-    threshold_high: float,
-    caps: dict[str, float] | None = None,
-) -> ScoreResult:
-    """计算单文件在指定模式下的分数、分解与理由。
+    config: ScoringConfig,
+) -> FileResult:
+    """对单个文件进行**全部四种**基础模式评分，并包装为 :class:`FileResult`。"""
+    result = FileResult(
+        metrics=metrics,
+        recency_threshold_low=config.recency_threshold_low,
+        recency_threshold_high=config.recency_threshold_high,
+    )
 
-    ``caps`` 可覆盖 :data:`DEFAULT_CAPS` 中的归一化上限（缺省键回退默认值）。
-    权重内部会归一化到和为 1，因此自定义权重无需手工配平。
-    """
+    # 阈值与置信度参数
+    thresholds = config.severity_thresholds or _DEFAULT_THRESHOLDS
+    min_commits = max(config.min_commits_for_confidence, 1.0)
+
+    for m in ScoringMode:
+        score, breakdown, reasoning, recency = compute_score(m, metrics, config)
+        result.scores[m.value] = score
+        result.breakdowns[m.value] = breakdown
+        result.reasoning[m.value] = reasoning
+
+        # 计算 severity
+        severity = score_grade(score, thresholds)
+        # 近因联动：recency 低于 threshold_low 时降一档
+        if recency < config.recency_threshold_low:
+            severity = _DEMOTION_CHAIN.get(severity, severity)
+        result.severities[m.value] = severity
+
+        # 记录 recency_signal（用于后续复合模式或 UI 展示）
+        if m == mode:
+            result.recency_signal = recency
+
+    # 小样本置信度：提交数不足时线性降级 [0.3, 1.0]
+    confidence = _clamp(metrics.commits / min_commits, 0.3, 1.0)
+    result.confidence = confidence
+
+    # 缺失数据状态：size_bytes == 0 时标记 missing
     if metrics.size_bytes == 0:
-        return ScoreResult(0.0, {}, [], 0.0)
-
-    c = {**DEFAULT_CAPS, **(caps or {})}
-    weights = _normalize_weights(weights)
-
-    # ---- 归一化指标 [0,1] ----
-    n_contrib = clamp(metrics.unique_contributors / c["contrib"])
-    n_commits = clamp(metrics.commits / c["commits"])
-    n_size = clamp((metrics.size_bytes / 1024.0) / c["size_kb"])
-    n_age = clamp(math.log1p(metrics.age_days) / math.log1p(c["age_days"]))
-    n_churn = clamp(metrics.churn / c["churn"])
-    n_loc = clamp(metrics.lines_of_code / c["loc"])
-    n_decayed_commits = clamp(metrics.decayed_commits / c["commits"])
-    n_decayed_churn = clamp(metrics.decayed_churn / c["churn"])
-    n_gini = clamp(metrics.gini)
-    n_inv_contrib = clamp(1.0 - n_contrib)
-    n_recent_commits = clamp(metrics.recent_commits / c["recent"])
-    n_low_recent = clamp(1.0 - n_recent_commits)
-
-    # 结构信号归一化 [0,1]
-    n_cc = clamp(metrics.max_cyclomatic_complexity / c["cc"])
-    n_nesting = clamp(metrics.max_nesting_depth / c["nesting"])
-    n_symbols = clamp(metrics.symbol_count / c["symbols"])
-    n_imports = clamp(metrics.import_count / c["imports"])
-
-    # SATD 信号：按 LOC 归一化的标记密度（每 1000 行）
-    todo_per_1k = (
-        (metrics.todo_count / metrics.lines_of_code * 1000.0)
-        if metrics.lines_of_code > 0 else 0.0
-    )
-    n_todo_density = clamp(todo_per_1k / c["todo_density"])
-
-    recency_signal = compute_recency_signal(metrics)
-
-    # ---- 模式选择提交/改动指标：hot/roi 采用衰减后的近期量 ----
-    if mode in (ScoringMode.HOT, ScoringMode.ROI):
-        final_commits = n_decayed_commits
-        final_churn = n_decayed_churn
+        result.status = "missing"
+        result.confidence = 0.0
+    elif confidence < 1.0:
+        result.status = "low_confidence"
     else:
-        final_commits = n_commits
-        final_churn = n_churn
+        result.status = "ok"
 
-    # ---- 组装加权分解 ----
-    norm = {
-        BreakdownKey.AGE: n_age,
-        BreakdownKey.CHURN: final_churn,
-        BreakdownKey.COMMITS: final_commits,
-        BreakdownKey.CONTRIB: n_contrib,
-        BreakdownKey.SIZE: n_size,
-    }
-    if mode == ScoringMode.RISK:
-        norm.update(
-            {
-                BreakdownKey.GINI: n_gini,
-                BreakdownKey.INV_CONTRIB: n_inv_contrib,
-                BreakdownKey.LOC: n_loc,
-                BreakdownKey.LOW_RECENT: n_low_recent,
-            }
-        )
-    elif mode == ScoringMode.COMPLEXITY:
-        norm.update(
-            {
-                BreakdownKey.LOC: n_loc,
-                BreakdownKey.CC: n_cc,
-                BreakdownKey.NESTING: n_nesting,
-                BreakdownKey.SYMBOLS: n_symbols,
-                BreakdownKey.IMPORTS: n_imports,
-                BreakdownKey.TODO_DENSITY: n_todo_density,
-            }
-        )
-    elif mode == ScoringMode.ROI:
-        norm.update({BreakdownKey.GINI: n_gini, BreakdownKey.LOC: n_loc})
-
-    raw = 0.0
-    for key, value in norm.items():
-        raw += weights.get(key, 0.0) * value
-    score = raw * 100.0
-
-    # ---- 降权：测试/自动生成/示例/配置文件（两项独立，可叠加）----
-    path_lower = metrics.path.lower()
-    ext = os.path.splitext(metrics.path)[1].lower().lstrip(".")
-    if any(s in path_lower for s in _DEBUFF_SUBSTRINGS):
-        score *= 0.75 if mode == ScoringMode.RISK else 0.50
-    if ext in _CONFIG_EXTS and mode == ScoringMode.COMPLEXITY:
-        score *= 0.50
-
-    breakdown = {key: value * 100.0 for key, value in norm.items() if weights.get(key, 0.0) != 0}
-    severity = score_grade(score)
-    reasoning = _compute_reasoning(
-        breakdown, mode, recency_signal, threshold_low, threshold_high
+    # 汇总状态：取所有模式中最差的 severity
+    severity_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    worst_severity = max(
+        result.severities.values(),
+        key=lambda s: severity_order.get(s, 0),
+        default="low",
     )
-    if severity in ("critical", "high"):
-        reasoning.insert(0, f"Severity: {severity}（{score:.0f} 分），建议优先处理。")
-    return ScoreResult(score, breakdown, reasoning, recency_signal, severity)
 
-
-def _compute_reasoning(
-    breakdown: dict[BreakdownKey, float],
-    mode: ScoringMode,
-    recency_signal: float,
-    threshold_low: float,
-    threshold_high: float,
-) -> list[str]:
-    """把数值分解翻译为可读理由。"""
-    significant, dominant = 20.0, 30.0
-    b = breakdown
-    results: list[str] = []
-
-    gini = b.get(BreakdownKey.GINI, 0.0)
-    age = b.get(BreakdownKey.AGE, 0.0)
-    low_recent = b.get(BreakdownKey.LOW_RECENT, 0.0)
-    loc = b.get(BreakdownKey.LOC, 0.0)
-    churn = b.get(BreakdownKey.CHURN, 0.0)
-    inv_contrib = b.get(BreakdownKey.INV_CONTRIB, 0.0)
-    cc = b.get(BreakdownKey.CC, 0.0)
-    nesting = b.get(BreakdownKey.NESTING, 0.0)
-    symbols = b.get(BreakdownKey.SYMBOLS, 0.0)
-    imports = b.get(BreakdownKey.IMPORTS, 0.0)
-    todo_density = b.get(BreakdownKey.TODO_DENSITY, 0.0)
-
-    # 结构信号主导的复合理由
-    if cc > significant and churn > significant:
-        results.append(
-            "Tangled Hotspot: 高圈复杂度 + 高改动频率，是重构最高优先级目标。"
-        )
-    if nesting > dominant:
-        results.append("Deep Nesting: 嵌套层级过深，认知负荷极高。")
-    if symbols > significant and imports > significant:
-        results.append("Broad Surface: 符号与导入过多，职责边界模糊。")
-
-    if gini > significant and age > significant and low_recent > significant:
-        results.append(
-            "Institutional Amnesia: 关键逻辑集中在不活跃的作者手中，维护衰减风险高。"
-        )
-    if churn > dominant and loc > significant:
-        results.append("Volatile Anchor: 大模块频繁大幅改动，重构回报高。")
-    if gini > dominant or inv_contrib > dominant:
-        results.append("Knowledge Silo: 文件所有权过度集中在少数人手中。")
-
-    # SATD 理由（候选 ≠ 确诊措辞纪律）
-    if todo_density > significant:
-        results.append(
-            "SATD Candidate: 文件中存在显式技术债标记（TODO/FIXME/HACK/XXX），"
-            "可作为潜在重构候选，但需人工确认是否真实遗留问题。"
-        )
-
-    if len(results) < 2:
-        if churn > significant:
-            if recency_signal > threshold_high:
-                msg = "High Churn: 近期波动表明该文件是当前开发瓶颈。"
-            elif recency_signal < threshold_low:
-                msg = "Historical Hotspot: 累计改动巨大，但近期已趋稳定。"
-            else:
-                msg = "High Churn: 高累计波动表明该文件是历史瓶颈。"
-            results.append(msg)
-        if low_recent > significant:
-            results.append("Knowledge Decay: 文件久未更新，机构性遗忘风险上升。")
-        if loc > significant:
-            results.append("Structural Complexity: 高代码行数增加维护者的认知负担。")
-        if cc > significant:
-            results.append("Cyclomatic Load: 分支逻辑复杂，测试与维护成本高。")
-        if nesting > significant:
-            results.append("Nested Logic: 嵌套层级偏高，阅读与调试难度大。")
-        if symbols > significant:
-            results.append("Symbol Overload: 符号数量多，文件职责可能过重。")
-
-    if mode == ScoringMode.ROI:
-        if churn > significant and loc > significant:
-            results.append("High Conflict Tax: 大文件上的并行开发带来协调开销。")
-        if gini > significant:
-            results.append("Knowledge Fragility: 主要所有者缺席时财务风险高。")
-
-    if mode == ScoringMode.RISK and not results:
-        results.append("Ownership Risk: 该资源贡献者多样性偏低。")
-
-    return results
-
-
-def score_file(metrics: FileMetrics, mode: ScoringMode, config) -> FileResult:
-    """对单个文件评分：计算全部基础模式，再按活动模式决定 ``mode_score``。
-
-    ``config`` 为 :class:`~githotmap.config.config.ScoringConfig`（或任何提供
-    ``weights_for`` / ``recency_threshold_low`` / ``recency_threshold_high`` 的对象）。
-    """
-    result = FileResult(metrics=metrics)
-    result.recency_threshold_low = config.recency_threshold_low
-    result.recency_threshold_high = config.recency_threshold_high
-
-    caps = getattr(config, "normalization_caps", None)
-    for base in _BASE_MODES:
-        sr = compute_score(
-            metrics,
-            base,
-            config.weights_for(base),
-            config.recency_threshold_low,
-            config.recency_threshold_high,
-            caps=caps,
-        )
-        result.scores[base.value] = sr.score
-        result.breakdowns[base.value] = {k.value: v for k, v in sr.breakdown.items()}
-        result.reasoning[base.value] = sr.reasoning
-        result.severities[base.value] = sr.severity
-        result.recency_signal = sr.recency_signal
-
-    result.mode_score = result.scores.get(mode.value, 0.0)
+    result.mode_score = result.scores[mode.value]
     return result
 
 
-def score_files(metrics_map, mode: ScoringMode, config) -> list[FileResult]:
-    """批量评分，返回 FileResult 列表（未排序）。"""
-    return [score_file(m, mode, config) for m in metrics_map]
+def apply_composite(
+    file_result: FileResult,
+    weights: list[tuple[ScoringMode, float]],
+) -> None:
+    """基于已有基础模式分数，计算复合模式分数并覆盖 ``mode_score``。"""
+    if not weights:
+        return
 
+    total_weight = sum(w for _, w in weights)
+    if total_weight == 0.0:
+        return
 
-def compute_composite_score(
-    file_result: FileResult, composite: CompositeMode, blend: list[tuple[ScoringMode, float]]
-) -> tuple[float, dict[str, float]]:
-    """融合基础模式分数为复合分数，并返回融合后的分解。"""
-    weights = _normalize_blend(blend)
-    blended = 0.0
-    blended_breakdown: dict[str, float] = {}
-    for base, weight in weights.items():
-        score = file_result.scores.get(base.value)
-        if score is None:
-            continue
-        blended += score * weight
-        for key, value in file_result.breakdowns.get(base.value, {}).items():
-            blended_breakdown[key] = blended_breakdown.get(key, 0.0) + value * weight
-    return clamp(blended, 0.0, 100.0), blended_breakdown
+    score = 0.0
+    breakdown: dict[str, float] = {}
+    reasoning: list[str] = []
+    severities: list[str] = []
 
+    for base_mode, weight in weights:
+        ratio = weight / total_weight
+        mode_score = file_result.scores.get(base_mode.value, 0.0)
+        score += mode_score * ratio
 
-def _normalize_blend(blend: list[tuple[ScoringMode, float]]) -> dict[ScoringMode, float]:
-    """归一化配比权重；非法/不完整时回退为等权。"""
-    weights: dict[ScoringMode, float] = {}
-    total = 0.0
-    for mode, w in blend:
-        if w <= 0:
-            return {m: 1.0 / len(blend) for m, _ in blend}
-        weights[mode] = w
-        total += w
-    if total <= 0:
-        return {m: 1.0 / len(blend) for m, _ in blend}
-    return {m: w / total for m, w in weights.items()}
+        # 合并 breakdown（按比例缩放）
+        base_breakdown = file_result.breakdowns.get(base_mode.value, {})
+        for key, val in base_breakdown.items():
+            breakdown[key] = breakdown.get(key, 0.0) + val * ratio
 
+        # 合并 reasoning
+        base_reasoning = file_result.reasoning.get(base_mode.value, [])
+        reasoning.extend(base_reasoning)
 
-def _composite_reasoning(
-    file_result: FileResult, composite: CompositeMode, blend: list[tuple[ScoringMode, float]]
-) -> list[str]:
-    """为复合模式生成理由：标注配比，并汇总各组成基础模式的理由。
+        severities.append(file_result.severities.get(base_mode.value, "low"))
 
-    理由按组成模式的权重从高到低拼接；模式名以 ``hot``/``risk`` 等原文呈现，
-    便于与渲染层的模式切换器对应。若无任何组成模式产出理由，则回退为一条
-    总体说明，保证渲染层始终有内容可显示。
-    """
-    weights = _normalize_blend(blend)
-    header = "Composite Score: " + " + ".join(
-        f"{base.value} {weight:.0%}" for base, weight in weights.items()
-    )
-    reasons: list[str] = [header]
-    for base, weight in sorted(weights.items(), key=lambda item: item[1], reverse=True):
-        if weight <= 0:
-            continue
-        for reason in file_result.reasoning.get(base.value, []):
-            reasons.append(f"[{base.value}] {reason}")
-    if len(reasons) == 1:
-        reasons.append(f"复合模式 {composite.value} 的各组成信号均未超过显著性阈值。")
-    return reasons
-
-
-def apply_composite(file_result: FileResult, composite: CompositeMode, blend) -> None:
-    """把复合分数写回 ``file_result``（以复合模式名为键），并设为当前排序分数。
-
-    同时写入融合后的分解与理由，保证复合模式与基础模式在渲染层有完整对称的输出。
-    """
-    score, breakdown = compute_composite_score(file_result, composite, blend)
-    file_result.scores[composite.value] = score
-    file_result.breakdowns[composite.value] = breakdown
-    file_result.reasoning[composite.value] = _composite_reasoning(file_result, composite, blend)
-    file_result.severities[composite.value] = score_grade(score)
+    composite_mode = "+".join(m.value for m, _ in weights)
+    file_result.scores[composite_mode] = score
+    file_result.breakdowns[composite_mode] = breakdown
+    file_result.reasoning[composite_mode] = reasoning[:5]  # 限制长度
+    file_result.severities[composite_mode] = score_grade(score)
     file_result.mode_score = score
