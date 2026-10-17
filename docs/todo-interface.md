@@ -118,6 +118,16 @@
 | `path_base` | `str` | 实际使用的路径基准目录（与 M2 一致） |
 | `todos` | `list[TodoItem]` | 全部技术债条目，按 `(path, lineno, column)` 升序 |
 
+**便捷属性与聚合方法（面向 M5/M6 开箱即用）：**
+
+| 方法 / 属性 | 返回类型 | 说明 |
+|-------------|----------|------|
+| `total_count` | `int` | 技术债标记总数（属性） |
+| `paths()` | `list[str]` | 包含技术债的文件路径去重列表（升序） |
+| `by_path()` | `dict[str, list[TodoItem]]` | 按文件路径建索引字典，供 M4/M5 做字典 join |
+| `count_by_kind()` | `dict[str, int]` | 统计各标记数量（含全部枚举键），供 M6 直接画饼图 |
+| `count_by_path()` | `dict[str, int]` | 按文件统计技术债数量，供 M5 快速获取文件级信号 |
+
 ---
 
 ## 6. 公共 API
@@ -207,3 +217,4 @@ return jsonify(TodoDetector().detect(scan).to_dict())   # 已是 JSON 原生类�
 | 版本 | 日期 | 变更 | 作者 |
 |------|------|------|------|
 | v0.1 | Sprint 1 | 初稿：定义路径规范、3 个数据结构、公共 API、下游接入约定 | Member 3 |
+| v0.2 | Sprint 1 | 修复行内字符串假阳性（tokenize Token 级物理隔离）；TodoScan 增加面向 M5/M6 的聚合统计接口（total_count, paths, by_path, count_by_kind, count_by_path） | Member 3 |

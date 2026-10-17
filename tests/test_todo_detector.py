@@ -71,3 +71,40 @@ def test_to_dict_json_native(tmp_path):
     json.dumps(payload)
     assert isinstance(payload["todos"], list)
     assert len(result.todos) == 1
+    assert payload["total_count"] == 1
+    assert payload["counts_by_kind"]["TODO"] == 1
+
+
+def test_scan_convenience_methods(tmp_path):
+    """测试面向 M5/M6 的便捷聚合统计接口。"""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("# TODO: one\n# FIXME: two\n", encoding="utf-8")
+    (src / "b.py").write_text("# TODO: three\n", encoding="utf-8")
+
+    scan = _make_scan(str(tmp_path), ["src/a.py", "src/b.py"])
+    result = TodoDetector().detect(scan)
+
+    # 1. total_count 属性
+    assert result.total_count == 3
+
+    # 2. paths() 去重且升序
+    assert result.paths() == ["src/a.py", "src/b.py"]
+
+    # 3. by_path() 字典索引
+    by_path = result.by_path()
+    assert len(by_path["src/a.py"]) == 2
+    assert len(by_path["src/b.py"]) == 1
+    assert [t.kind.value for t in by_path["src/a.py"]] == ["TODO", "FIXME"]
+
+    # 4. count_by_kind() 分类计数
+    kinds = result.count_by_kind()
+    assert kinds["TODO"] == 2
+    assert kinds["FIXME"] == 1
+    assert kinds["HACK"] == 0
+    assert kinds["XXX"] == 0
+
+    # 5. count_by_path() 文件级计数
+    by_path_counts = result.count_by_path()
+    assert by_path_counts == {"src/a.py": 2, "src/b.py": 1}
+

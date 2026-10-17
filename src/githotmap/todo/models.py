@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -75,8 +76,54 @@ class TodoScan:
     #: 全部技术债条目，已按 ``(path, lineno, column)`` 升序排序（确定性要求）。
     todos: list[TodoItem] = field(default_factory=list)
 
+    @property
+    def total_count(self) -> int:
+        """检出的技术债标记总数。"""
+        return len(self.todos)
+
+    def paths(self) -> list[str]:
+        """返回所有包含技术债的文件路径列表（升序、去重）。"""
+        seen: set[str] = set()
+        res: list[str] = []
+        for t in self.todos:
+            if t.path not in seen:
+                seen.add(t.path)
+                res.append(t.path)
+        return res
+
+    def by_path(self) -> dict[str, list[TodoItem]]:
+        """按文件路径建立技术债索引，供 M4/M5 做字典 join。
+
+        返回:
+            {文件路径: 该文件内的 TodoItem 列表}（条目内部保持行号升序）。
+        """
+        mapping: dict[str, list[TodoItem]] = defaultdict(list)
+        for t in self.todos:
+            mapping[t.path].append(t)
+        return dict(mapping)
+
+    def count_by_kind(self) -> dict[str, int]:
+        """统计各类标记的数量（如 {'TODO': 12, 'FIXME': 3, 'HACK': 1, 'XXX': 0}）。
+
+        返回的字典包含全部 TodoKind 枚举键，供 M6 图表直接消费，无需额外判空。
+        """
+        counts: dict[str, int] = {k.value: 0 for k in TodoKind}
+        for t in self.todos:
+            counts[t.kind.value] += 1
+        return counts
+
+    def count_by_path(self) -> dict[str, int]:
+        """按文件统计技术债数量索引，供 M5 评分引擎快速获取文件级技术债信号。
+
+        返回:
+            {文件路径: 技术债总数}。
+        """
+        return {path: len(items) for path, items in self.by_path().items()}
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "path_base": self.path_base,
+            "total_count": self.total_count,
+            "counts_by_kind": self.count_by_kind(),
             "todos": [t.to_dict() for t in self.todos],
         }
