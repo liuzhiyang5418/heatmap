@@ -41,6 +41,13 @@ class BreakdownKey(str, Enum):
     INV_CONTRIB = "inv_contrib"
     LOC = "loc"
     LOW_RECENT = "low_recent"
+    # 结构信号（来自 scanner 模块的 AST 解析）
+    CC = "cc"                          # 最大圈复杂度
+    NESTING = "nesting"                # 最大嵌套深度
+    SYMBOLS = "symbols"                # 符号数量（类+函数）
+    IMPORTS = "imports"                # 导入数量
+    # SATD 信号（来自 todo 模块的注释检测）
+    TODO_DENSITY = "todo_density"      # TODO/FIXME/HACK/XXX 密度（按 LOC 归一化）
 
 
 @dataclass(slots=True)
@@ -61,6 +68,13 @@ class FileMetrics:
     decayed_churn: float = 0.0
     # 每位贡献者的提交次数，用于事后复算 Gini / 调试。
     contributor_commits: dict[str, float] = field(default_factory=dict)
+    # 结构信号（由 scanner 模块注入，非 Python 文件或解析失败时保持 0）
+    max_cyclomatic_complexity: float = 0.0
+    max_nesting_depth: float = 0.0
+    symbol_count: float = 0.0
+    import_count: float = 0.0
+    # SATD 信号（由 todo 模块注入）
+    todo_count: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +90,11 @@ class FileMetrics:
             "gini": self.gini,
             "decayed_commits": self.decayed_commits,
             "decayed_churn": self.decayed_churn,
+            "max_cyclomatic_complexity": self.max_cyclomatic_complexity,
+            "max_nesting_depth": self.max_nesting_depth,
+            "symbol_count": self.symbol_count,
+            "import_count": self.import_count,
+            "todo_count": self.todo_count,
         }
 
 
@@ -93,8 +112,14 @@ class FileResult:
     breakdowns: dict[str, dict[str, float]] = field(default_factory=dict)
     # mode 名称(str) -> 自然语言理由列表
     reasoning: dict[str, list[str]] = field(default_factory=dict)
+    # mode 名称(str) -> 风险等级（critical/high/medium/low）
+    severities: dict[str, str] = field(default_factory=dict)
     # 当前活动评分模式的分数（排序依据）。
     mode_score: float = 0.0
+    # 数据状态：ok / missing / low_confidence
+    status: str = "ok"
+    # 评分置信度 [0,1]：1.0 为完全可信，低样本或缺失数据时降低。
+    confidence: float = 1.0
 
     # ---- 便捷透传属性，避免调用方反复访问 metrics ----
     @property
@@ -139,7 +164,10 @@ class FileResult:
             "scores": self.scores,
             "breakdowns": self.breakdowns,
             "reasoning": self.reasoning,
+            "severities": self.severities,
             "mode_score": self.mode_score,
+            "status": self.status,
+            "confidence": self.confidence,
         }
 
 

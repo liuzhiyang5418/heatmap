@@ -7,13 +7,16 @@ import pytest
 from githotmap.config.config import COMPOSITE_WEIGHTS, ScoringConfig
 from githotmap.core.models import CompositeMode, FileMetrics, FileResult, ScoringMode
 from githotmap.core.scoring import (
+    DEFAULT_CAPS,
     _normalize_blend,
+    _normalize_weights,
     apply_composite,
     compute_composite_score,
     compute_recency_signal,
     compute_score,
     score_file,
     score_files,
+    score_grade,
 )
 
 
@@ -213,3 +216,76 @@ def test_recency_reasoning_active_vs_historical() -> None:
         stale, ScoringMode.HOT, cfg.weights_for(ScoringMode.HOT), 0.1, 0.4
     )
     assert any("近期已趋稳定" in r for r in sr_stale.reasoning)
+
+
+def test_score_grade_thresholds() -> None:
+    assert score_grade(80.0) == "critical"
+    assert score_grade(75.0) == "critical"
+    assert score_grade(60.0) == "high"
+    assert score_grade(30.0) == "medium"
+    assert score_grade(0.0) == "low"
+
+
+def test_normalize_weights_scales_to_sum_one() -> None:
+    from githotmap.core.models import BreakdownKey
+
+    w = _normalize_weights({BreakdownKey.CHURN: 2.0, BreakdownKey.LOC: 2.0})
+    assert sum(w.values()) == pytest.approx(1.0)
+    # 负权重按 0 处理
+    w2 = _normalize_weights({BreakdownKey.CHURN: -1.0, BreakdownKey.LOC: 3.0})
+    assert w2[BreakdownKey.CHURN] == 0.0
+    assert w2[BreakdownKey.LOC] == pytest.approx(1.0)
+
+
+def test_unnormalized_weights_do_not_inflate_score() -> None:
+    """权重和不等于 1 时分数仍应保持 0–100 语义（同一文件两种配权结果一致）。"""
+    cfg = _cfg()
+    m = make_metrics()
+    w1 = cfg.weights_for(ScoringMode.HOT)
+    w2 = {k: v * 7 for k, v in w1.items()}  # 放大 7 倍
+    s1 = compute_score(m, ScoringMode.HOT, w1, 0.1, 0.4).score
+    s2 = compute_score(m, ScoringMode.HOT, w2, 0.1, 0.4).score
+    assert s1 == pytest.approx(s2)
+
+
+def test_custom_caps_affect_normalization() -> None:
+    cfg = _cfg()
+    m = make_metrics(commits=100.0, decayed_commits=100.0)
+    default = compute_score(m, ScoringMode.HOT, cfg.weights_for(ScoringMode.HOT), 0.1, 0.4)
+    # 把 commits 上限调低到 100：commits 信号应饱和为 1.0（默认 500 时仅 0.2）
+    capped = compute_score(
+        m,
+        ScoringMode.HOT,
+        cfg.weights_for(ScoringMode.HOT),
+        0.1,
+        0.4,
+        caps={"commits": 100.0},
+    )
+    assert capped.breakdown["commits"] == pytest.approx(100.0)
+    assert default.breakdown["commits"] == pytest.approx(20.0)
+    # 未指定的键回退默认值
+    assert DEFAULT_CAPS["churn"] == 5000.0
+
+
+def test_score_file_populates_severities() -> None:
+    f = score_file(make_metrics(), ScoringMode.HOT, _cfg())
+    assert set(f.severities) == {m.value for m in ScoringMode}
+    assert f.severities[ScoringMode.HOT.value] in {"critical", "high", "medium", "low"}
+
+
+def test_high_score_gets_severity_reason_prefix() -> None:
+    cfg = _cfg()
+    m = make_metrics()  # churn/decayed 都高
+    sr = compute_score(m, ScoringMode.HOT, cfg.weights_for(ScoringMode.HOT), 0.1, 0.4)
+    if sr.severity in ("critical", "high"):
+        assert sr.reasoning[0].startswith("Severity:")
+
+
+def test_composite_severity_written() -> None:
+    f = score_file(make_metrics(), ScoringMode.HOT, _cfg())
+    apply_composite(
+        f, CompositeMode.LEGACY_DEBT, COMPOSITE_WEIGHTS[CompositeMode.LEGACY_DEBT]
+    )
+    assert f.severities[CompositeMode.LEGACY_DEBT.value] in {
+        "critical", "high", "medium", "low",
+    }
