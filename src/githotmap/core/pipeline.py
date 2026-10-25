@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+from dataclasses import replace
 from pathlib import Path
 from typing import Iterable
 
@@ -143,7 +144,6 @@ class AnalysisPipeline:
         #    复合模式需要一个基础模式作为初始 mode_score，随后被复合分数覆盖。
         seed_mode = base_mode if base_mode is not None else ScoringMode.HOT
         # 将自适应 caps 注入 config 的临时副本（避免污染原始配置）
-        from dataclasses import replace
         scoring_cfg = replace(cfg, normalization_caps=caps_override)
         files: list[FileResult] = [
             score_file(m, seed_mode, scoring_cfg) for m in metrics_map.values()
@@ -153,7 +153,7 @@ class AnalysisPipeline:
         if composite is not None:
             weights = COMPOSITE_WEIGHTS.get(composite, [])
             for f in files:
-                apply_composite(f, weights)
+                apply_composite(f, composite, weights, thresholds=scoring_cfg.severity_thresholds)
 
         # 5. 排序：按 mode_score 取前 N。
         ranked_files = rank_files(files, limit=limit if limit is not None else cfg.limit)
