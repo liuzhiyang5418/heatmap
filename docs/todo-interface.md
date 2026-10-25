@@ -6,7 +6,7 @@
 | 负责人 | Member 3 |
 | 对应课程分工 | 需求分析中的「正则解析、技术债信息提取」 |
 | 代码位置 | `src/githotmap/todo/` |
-| 文档状态 | v0.1（Sprint 1 初稿，待 M4/M5/M6 会签） |
+| 文档状态 | v0.3（Sprint 2，含信息提取深化与聚合接口） |
 | 适用版本 | githotmap 0.1.0 |
 
 ---
@@ -110,6 +110,9 @@
 | `column` | `int` | 标记在行内的起始列（1 起） |
 | `text` | `str` | 该行完整文本（上下文） |
 | `description` | `str` | 标记之后的任务描述（技术债信息提取） |
+| `owner` | `str` | 责任人，从 `TODO(alice):` / `TODO @alice` 解析，无则 `""` |
+| `ref` | `str` | 关联引用，从 `TODO #123:` / `TODO(HEATMAP-45):` 解析，无则 `""` |
+| `severity` | `int` | 紧急程度：1 常规 / 2 重要 / 3 紧急（由 `urgent`/`critical` 等关键词判定），供 M5 加权 |
 
 ### 5.3 `TodoScan` —— 顶层结果
 
@@ -172,6 +175,8 @@ def iter_todos(path: str, source: str) -> Iterator[TodoItem]:
 | `todos` 总数 | `TodoScan` | 显式技术债计数 |
 | 各类 `kind` 计数 | 同上 | 技术债构成（TODO/FIXME/HACK/XXX） |
 | `description` 非空比例 | 同上 | 信息完整度 |
+| `owner` / `ref` 非空比例 | `TodoItem` | 责任归属与工单关联度（治理成熟度） |
+| `severity` 分布 | `TodoItem` | 紧急技术债占比，可直接作为加权因子 |
 
 > **权重与归一化归 M5**。本模块只给原始事实，不做任何 0–1 归一化。
 
@@ -218,3 +223,4 @@ return jsonify(TodoDetector().detect(scan).to_dict())   # 已是 JSON 原生类�
 |------|------|------|------|
 | v0.1 | Sprint 1 | 初稿：定义路径规范、3 个数据结构、公共 API、下游接入约定 | Member 3 |
 | v0.2 | Sprint 1 | 修复行内字符串假阳性（tokenize Token 级物理隔离）；TodoScan 增加面向 M5/M6 的聚合统计接口（total_count, paths, by_path, count_by_kind, count_by_path） | Member 3 |
+| v0.3 | Sprint 2 | 深化信息提取：TodoItem 新增 owner / ref / severity 字段与解析规则 | Member 3 |

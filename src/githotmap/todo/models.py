@@ -45,7 +45,10 @@ class TodoItem:
     - ``lineno``  ：所在行号（1 起）；
     - ``column``  ：标记在行内的起始列（1 起）；
     - ``text``    ：该行完整文本（作上下文，便于人工查看）；
-    - ``description``：标记之后的任务描述（技术债信息提取的结果）。
+    - ``description``：标记之后的任务描述（技术债信息提取的结果）；
+    - ``owner``   ：责任人（从 ``TODO(alice):`` / ``TODO @alice`` 解析，无则为空串）；
+    - ``ref``     ：关联引用（从 ``TODO #123:`` / ``TODO(HEATMAP-45):`` 解析，无则为空串）；
+    - ``severity``：紧急程度 1（常规）/ 2（重要）/ 3（紧急），供 M5 加权。
     """
 
     path: str
@@ -54,6 +57,9 @@ class TodoItem:
     column: int
     text: str
     description: str = ""
+    owner: str = ""
+    ref: str = ""
+    severity: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         """转成只含 JSON 原生类型的字典，供 M6 ``json.dumps``。"""
@@ -64,6 +70,9 @@ class TodoItem:
             "column": self.column,
             "text": self.text,
             "description": self.description,
+            "owner": self.owner,
+            "ref": self.ref,
+            "severity": self.severity,
         }
 
 

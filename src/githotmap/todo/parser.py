@@ -10,6 +10,8 @@
   造成的假阳性；
 - 用标准库 ``ast`` 定位**文档字符串**覆盖的行，仅对属于 docstring 的字符串 token 提取标记；
 - 排序与确定性：产出的条目保证按 ``(lineno, column)`` 严格升序；
+- 信息提取：标记之后的文本进一步解析出责任人（``owner``）、关联引用（``ref``）
+  与紧急程度（``severity``），供 M5 加权、M6 展示；
 - 任何词法/语法失败都**降级**而非抛异常：单文件出错绝不影响整次检测。
 """
 
@@ -31,6 +33,32 @@ _KIND_BY_NAME: dict[str, TodoKind] = {kind.value: kind for kind in TodoKind}
 
 #: 描述前导分隔符（冒号/横杠/星号/空白），提取 description 时去掉。
 _DESC_LEAD_RE = re.compile(r"^[\s:：\-*]*")
+
+#: 责任人/引用解析：圆括号、@ 提及、# 编号（均在标记之后的文本中查找）。
+_PAREN_RE = re.compile(r"\(([^()]+)\)")
+_AT_RE = re.compile(r"@([A-Za-z0-9_][\w.\-]*)")
+_HASH_RE = re.compile(r"#(\d+)")
+
+#: 判定圆括号内容是否属于"引用"而非人名：纯数字编号或 PROJ-123 形式的工单号。
+_REF_LIKE_RE = re.compile(r"^(#\d+|[A-Za-z][A-Za-z0-9]*-\d+)$")
+
+#: 判定圆括号内容是否属于"责任人"：ASCII 标识符（alice/zhang.san）或 2~10 位中文名。
+_NAME_LIKE_RE = re.compile(r"^[A-Za-z][\w.\-]*$|^[一-龥]{2,10}$")
+
+#: 严重等级关键词（大小写不敏感）：命中越靠前的规则等级越高，默认 1。
+_SEVERITY_PATTERNS: list[tuple[re.Pattern[str], int]] = [
+    (
+        re.compile(
+            r"\b(urgent|asap|critical|blocker|immediately|high[\s-]?priority|p0|p1)\b",
+            re.IGNORECASE,
+        ),
+        3,
+    ),
+    (
+        re.compile(r"\b(important|soon|medium[\s-]?priority|should|p2)\b", re.IGNORECASE),
+        2,
+    ),
+]
 
 
 def _docstring_rows(source: str) -> set[int]:
@@ -60,13 +88,68 @@ def _docstring_rows(source: str) -> set[int]:
     return rows
 
 
-def _extract_description(text: str, match: re.Match[str]) -> str:
+def _extract_description(after: str) -> str:
     """提取标记之后的描述文字（去掉冒号/横杠/星号与多余空格，并截断过长内容）。"""
-    after = text[match.end():]
     desc = _DESC_LEAD_RE.sub("", after).strip()
     # 清理行末尾可能存在的 docstring 闭合引号
-    desc = re.sub(r'["\']+$', "", desc).strip()
+    desc = re.sub(r"['\"]+$", "", desc).strip()
     return desc[:120]
+
+
+def _extract_meta(after: str) -> tuple[str, str, int]:
+    """从标记之后的文本中提取 (owner, ref, severity)。
+
+    解析规则：
+    - ``TODO(alice):``  → 圆括号内非工单号内容判为人名 → owner；
+    - ``TODO(HEATMAP-45):`` / ``TODO(#123)`` → 圆括号内工单号形态 → ref；
+    - ``TODO @alice`` → @ 提及 → owner（仅在前面没解析到时）；
+    - ``TODO #123`` → # 编号 → ref（仅在前面没解析到时）；
+    - ``urgent/critical`` 等词 → severity 3，``important/should`` → 2，否则 1。
+    """
+    owner = ""
+    ref = ""
+
+    paren = _PAREN_RE.search(after)
+    if paren:
+        content = paren.group(1).strip()
+        if content:
+            if _REF_LIKE_RE.match(content):
+                ref = content
+            elif _NAME_LIKE_RE.match(content):
+                owner = content
+        # 既不像工单号也不像人名的括号内容（如 "see #123"）直接忽略，避免误判。
+
+    at_match = _AT_RE.search(after)
+    if at_match and not owner:
+        owner = at_match.group(1)
+
+    hash_match = _HASH_RE.search(after)
+    if hash_match and not ref:
+        ref = f"#{hash_match.group(1)}"
+
+    severity = 1
+    for pattern, level in _SEVERITY_PATTERNS:
+        if level > severity and pattern.search(after):
+            severity = level
+
+    return owner, ref, severity
+
+
+def _make_item(path: str, match: re.Match[str], lineno: int, column: int, text: str) -> TodoItem:
+    """按统一规则把一次正则匹配构造成 :class:`TodoItem`（唯一的构造点）。"""
+    after = text[match.end():]
+    owner, ref, severity = _extract_meta(after)
+    return TodoItem(
+        path=path,
+        kind=_KIND_BY_NAME[match.group(1).upper()],
+        lineno=lineno,
+        column=column,
+        text=text.strip(),
+        description=_extract_description(after),
+        owner=owner,
+        ref=ref,
+        severity=severity,
+    )
 
 
 def _iter_todos_fallback(path: str, source: str) -> list[TodoItem]:
@@ -79,14 +162,7 @@ def _iter_todos_fallback(path: str, source: str) -> list[TodoItem]:
         comment_part = line[hash_idx:]
         for match in _MARKER_RE.finditer(comment_part):
             todos.append(
-                TodoItem(
-                    path=path,
-                    kind=_KIND_BY_NAME[match.group(1).upper()],
-                    lineno=lineno,
-                    column=hash_idx + match.start() + 1,
-                    text=comment_part.strip(),
-                    description=_extract_description(comment_part, match),
-                )
+                _make_item(path, match, lineno, hash_idx + match.start() + 1, comment_part)
             )
     return todos
 
@@ -120,13 +196,8 @@ def iter_todos(path: str, source: str) -> Iterator[TodoItem]:
             start_line, start_col = token.start
             for match in _MARKER_RE.finditer(comment_text):
                 todos.append(
-                    TodoItem(
-                        path=path,
-                        kind=_KIND_BY_NAME[match.group(1).upper()],
-                        lineno=start_line,
-                        column=start_col + match.start() + 1,
-                        text=comment_text.strip(),
-                        description=_extract_description(comment_text, match),
+                    _make_item(
+                        path, match, start_line, start_col + match.start() + 1, comment_text
                     )
                 )
 
@@ -139,13 +210,8 @@ def iter_todos(path: str, source: str) -> Iterator[TodoItem]:
                 col_offset = token.start[1] if i == 0 else 0
                 for match in _MARKER_RE.finditer(line_content):
                     todos.append(
-                        TodoItem(
-                            path=path,
-                            kind=_KIND_BY_NAME[match.group(1).upper()],
-                            lineno=cur_line,
-                            column=col_offset + match.start() + 1,
-                            text=line_content.strip(),
-                            description=_extract_description(line_content, match),
+                        _make_item(
+                            path, match, cur_line, col_offset + match.start() + 1, line_content
                         )
                     )
 
