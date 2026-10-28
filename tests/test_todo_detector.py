@@ -108,3 +108,41 @@ def test_scan_convenience_methods(tmp_path):
     by_path_counts = result.count_by_path()
     assert by_path_counts == {"src/a.py": 2, "src/b.py": 1}
 
+
+def test_unreadable_file_skipped_not_crash(tmp_path):
+    """缺陷 M3-2：单个文件读取失败（OSError）应跳过而非中断整次检测。"""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("# TODO: first\n", encoding="utf-8")
+
+    # missing.py 指向不存在的文件，读取时抛 FileNotFoundError。
+    scan = _make_scan(str(tmp_path), ["src/missing.py", "src/a.py"])
+    result = TodoDetector().detect(scan)
+
+    # 检测不中断，缺失文件被跳过，正常文件照常产出。
+    assert [t.path for t in result.todos] == ["src/a.py"]
+
+
+def test_files_with_limitations_skipped(tmp_path):
+    """缺陷 M3-3/M3-6：带 symlink/too-large/not-text 标记的条目应被跳过。"""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("# TODO: keep\n", encoding="utf-8")
+    # 下面三个文件故意不创建——即使创建了，带标记的条目也不应被读取。
+    (src / "b.py").write_text("# TODO: symlinked\n", encoding="utf-8")
+
+    scan = RepositoryScan(
+        root=str(tmp_path),
+        path_base=str(tmp_path),
+        files=[
+            FileStructure(path="src/a.py"),
+            FileStructure(path="src/b.py", limitations=["symlink"]),
+            FileStructure(path="src/c.py", limitations=["too-large"]),
+            FileStructure(path="src/d.py", limitations=["not-text"]),
+        ],
+    )
+    result = TodoDetector().detect(scan)
+
+    # b/c/d 全部跳过，只有无标记的 a.py 参与检测。
+    assert [t.path for t in result.todos] == ["src/a.py"]
+

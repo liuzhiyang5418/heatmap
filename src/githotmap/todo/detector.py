@@ -1,9 +1,12 @@
 """TODO Detection Module 的门面（消费 M2 的扫描结果）。
 
-关键约束（见 ``docs/scanner-interface.md`` §7.1）：
+关键约束（见 ``docs/scanner-interface.md`` §7.1 与 ``docs/todo-interface.md`` §4.3）：
 
 - 用 ``scan.paths()`` 作为输入面，**不要自行 ``os.walk``**，否则排除规则与全局不一致；
-- 读取源码使用 ``errors="replace"`` 降级，单文件出错不影响整体检测；
+- 带有 ``symlink`` / ``too-large`` / ``not-text`` 限制标记的条目直接跳过——
+  扫描器有意不提供这些文件的内容，跟随符号链接或全量读取超大文件既危险又浪费（M3-3/M3-6）；
+- 单文件读取失败（``OSError``：不存在/无权限/是目录）**跳过该文件而非中断整次检测**
+  （M3-2），解码异常由 ``errors="replace"`` 兜底；
 - 输出路径与扫描器保持一致（§4.1 路径规范），并在 ``TodoScan.path_base`` 记录基准目录。
 """
 
@@ -11,9 +14,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from githotmap.scanner import RepositoryScan
+from githotmap.scanner import Limitation, RepositoryScan
 from githotmap.todo.models import TodoItem, TodoScan
 from githotmap.todo.parser import iter_todos
+
+#: 带这些限制标记的文件不参与检测：
+#: symlink（符号链接，可能指向仓库外或失效目标）、too-large（超大文件）、not-text（二进制）。
+_SKIP_LIMITATIONS: frozenset[str] = frozenset(
+    {
+        Limitation.SYMLINK.value,
+        Limitation.TOO_LARGE.value,
+        Limitation.NOT_TEXT.value,
+    }
+)
 
 
 class TodoDetector:
@@ -30,14 +43,25 @@ class TodoDetector:
         返回:
             :class:`TodoScan`，条目已按 ``(path, lineno, column)`` 升序排序。
         """
+        by_path = scan.by_path()
         todos: list[TodoItem] = []
         for path in scan.paths():
+            # M3-3/M3-6：跳过扫描器已标记为符号链接 / 超大文件 / 二进制的条目。
+            structure = by_path.get(path)
+            if structure is not None and _SKIP_LIMITATIONS.intersection(structure.limitations):
+                continue
             # scan.paths() 是相对 path_base（Git 工作区根）的，不能拿 scan.root 拼接：
             # 当扫描的是仓库子目录时 root != path_base，会拼出 …/子目录/子目录/… 的不存在路径。
             # 见 docs/scanner-interface.md §4.1 与 §7.1。
-            source = (Path(scan.path_base) / path).read_text(
-                encoding="utf-8", errors="replace"
-            )
+            try:
+                source = (Path(scan.path_base) / path).read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except OSError:
+                # M3-2：单个文件读取失败（FileNotFoundError/PermissionError/
+                # IsADirectoryError 等）时跳过，绝不中断整次检测——
+                # 与接口文档 §4.3「单文件出错绝不影响整体检测」的容错承诺一致。
+                continue
             todos.extend(iter_todos(path, source))
 
         # 确定性排序（接口文档 §4.2），保证同样输入得到逐字节相同输出。

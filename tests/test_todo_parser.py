@@ -150,3 +150,26 @@ def test_to_dict_contains_meta():
     assert payload["ref"] == "#123"
     assert payload["severity"] == 3
 
+
+def test_fallback_string_hash_not_reported():
+    """缺陷 M3-4：语法错误降级时，字符串字面量里的 #TODO 不应被误报。"""
+    # 未闭合括号使 tokenize 抛错，触发降级路径；
+    # 第二行的 #TODO 在双引号字符串内部，不是注释。
+    code = 'def broken(:\nx = "a#TODO: not a comment"\n'
+    todos = list(iter_todos("a.py", code))
+    assert len(todos) == 0
+
+
+def test_fallback_genuine_comment_still_found():
+    """降级路径不应矫枉过正：语法错误文件里的真注释仍要能提取。"""
+    code = 'def broken(:\n# TODO: keep me\n'
+    todos = list(iter_todos("a.py", code))
+    assert len(todos) == 1
+    assert todos[0].description == "keep me"
+
+
+def test_docstring_description_strips_trailing_quotes():
+    """缺陷 M3-5：docstring 尾部引号不应残留在 description 中。"""
+    todo = next(iter(iter_todos("a.py", '"""TODO: 重构这个函数"""\n')))
+    assert todo.description == "重构这个函数"
+

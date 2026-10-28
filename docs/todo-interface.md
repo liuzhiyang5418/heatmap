@@ -6,7 +6,7 @@
 | 负责人 | Member 3 |
 | 对应课程分工 | 需求分析中的「正则解析、技术债信息提取」 |
 | 代码位置 | `src/githotmap/todo/` |
-| 文档状态 | v0.3（Sprint 2，含信息提取深化与聚合接口） |
+| 文档状态 | v0.3.1（Sprint 2，含缺陷修复与容错契约更新） |
 | 适用版本 | githotmap 0.1.0 |
 
 ---
@@ -78,7 +78,9 @@
 ### 4.3 编码与容错
 
 - 读取源码使用 `encoding="utf-8", errors="replace"`，解码失败不抛异常；
-- 单文件词法/语法错误**绝不影响整体检测**，只跳过该文件无法可靠识别的部分；
+- 单文件读取失败（`OSError`：不存在/无权限/是目录）**跳过该文件而非中断整次检测**；
+- 带有 `symlink` / `too-large` / `not-text` 限制标记的条目直接跳过（扫描器有意不提供其内容）；
+- 单文件词法/语法错误**绝不影响整体检测**，降级路径同样隔离字符串字面量中的假标记；
 - 判定为注释行使用 `tokenize` 的 `COMMENT` token；docstring 行使用 `ast`。
 
 ### 4.4 类型与序列化
@@ -224,3 +226,4 @@ return jsonify(TodoDetector().detect(scan).to_dict())   # 已是 JSON 原生类�
 | v0.1 | Sprint 1 | 初稿：定义路径规范、3 个数据结构、公共 API、下游接入约定 | Member 3 |
 | v0.2 | Sprint 1 | 修复行内字符串假阳性（tokenize Token 级物理隔离）；TodoScan 增加面向 M5/M6 的聚合统计接口（total_count, paths, by_path, count_by_kind, count_by_path） | Member 3 |
 | v0.3 | Sprint 2 | 深化信息提取：TodoItem 新增 owner / ref / severity 字段与解析规则 | Member 3 |
+| v0.3.1 | Sprint 2 | 缺陷修复（缺陷总结审查）：M3-2 单文件读取失败跳过不中断；M3-3/M3-6 跳过 symlink/too-large/not-text 条目；M3-4 降级路径隔离字符串假标记；M3-5 description 剥离尾部引号（随 v0.3 一并修复并补测试） | Member 3 |

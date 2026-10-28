@@ -34,6 +34,9 @@ _KIND_BY_NAME: dict[str, TodoKind] = {kind.value: kind for kind in TodoKind}
 #: 描述前导分隔符（冒号/横杠/星号/空白），提取 description 时去掉。
 _DESC_LEAD_RE = re.compile(r"^[\s:：\-*]*")
 
+#: 降级路径专用：匹配普通单/双引号字符串字面量，用于"抹白"后定位真注释（M3-4）。
+_PLAIN_STRING_RE = re.compile(r'"[^"]*"|\'[^\']*\'')
+
 #: 责任人/引用解析：圆括号、@ 提及、# 编号（均在标记之后的文本中查找）。
 _PAREN_RE = re.compile(r"\(([^()]+)\)")
 _AT_RE = re.compile(r"@([A-Za-z0-9_][\w.\-]*)")
@@ -153,10 +156,16 @@ def _make_item(path: str, match: re.Match[str], lineno: int, column: int, text: 
 
 
 def _iter_todos_fallback(path: str, source: str) -> list[TodoItem]:
-    """tokenize 发生语法/词法错误时的降级逻辑：按行寻找 # 注释部分。"""
+    """tokenize 发生语法/词法错误时的降级逻辑：按行寻找 # 注释部分。
+
+    为避免字符串字面量里的 ``#`` 被误判为注释起点（缺陷审查 M3-4），定位 ``#`` 前
+    先用正则把普通单双引号字符串"抹白"（替换为等长空格以保持列位置不变），
+    抹白后的行上找不到 ``#`` 就说明该行没有真注释。
+    """
     todos: list[TodoItem] = []
     for lineno, line in enumerate(source.splitlines(), start=1):
-        hash_idx = line.find("#")
+        cleaned = _PLAIN_STRING_RE.sub(lambda m: " " * len(m.group(0)), line)
+        hash_idx = cleaned.find("#")
         if hash_idx == -1:
             continue
         comment_part = line[hash_idx:]
