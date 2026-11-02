@@ -81,7 +81,7 @@ class ScoreResult:
     """单一评分模式的完整产出。"""
 
     score: float
-    breakdown: dict[BreakdownKey, float]  # 各信号的归一化值 × 100
+    breakdown: dict[BreakdownKey, float]  # 各信号的加权贡献百分比
     reasoning: list[str]
     recency_signal: float
     severity: str = "low"  # critical / high / medium / low，见 score_grade()
@@ -146,6 +146,9 @@ def compute_score(
         return ScoreResult(0.0, {}, [], 0.0)
 
     c = {**DEFAULT_CAPS, **(caps or {})}
+    for name, val in c.items():
+        if val <= 0 or not isinstance(val, (int, float)):
+            raise ValueError(f"归一化上限 '{name}' 必须为正数，当前为: {val}")
     weights = _normalize_weights(weights)
 
     # ---- 归一化指标 [0,1] ----
@@ -232,7 +235,13 @@ def compute_score(
     # 基础模式同样收敛到 0–100，避免浮点尾差越过上界（口径与复合模式保持一致）。
     score = clamp(score, 0.0, 100.0)
 
-    breakdown = {key: value * 100.0 for key, value in norm.items() if weights.get(key, 0.0) != 0}
+    # M5-1: breakdown 改为加权贡献百分比，确保 sum(breakdown) == 100.0
+    breakdown = {}
+    if raw > 0:
+        for key, value in norm.items():
+            w = weights.get(key, 0.0)
+            if w > 0:
+                breakdown[key] = (w * value / raw) * 100.0
     severity = score_grade(score, thresholds)
     reasoning = _compute_reasoning(
         breakdown, mode, recency_signal, threshold_low, threshold_high
