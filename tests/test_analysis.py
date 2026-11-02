@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import git as _git
@@ -217,3 +217,27 @@ def test_commit_frequency_invalid_group() -> None:
         pass
     else:
         raise AssertionError("Expected ValueError for invalid group_by")
+
+
+def test_commit_frequency_groups_by_utc_not_local(tmp_path: Path) -> None:
+    """M4-4 回归：day 分组应基于 UTC 日期，而非提交自身的本地时区。
+
+    一条提交本地时间 09-20 01:00 +0800 == UTC 09-19 17:00，跨天。修复后
+    应归到 UTC 的 09-19，而不是本地时区的 09-20。
+    """
+    repo = _git.Repo.init(tmp_path / "repo")
+    tz_plus8 = timezone(timedelta(hours=8))
+    _commit_file(
+        repo,
+        "alice",
+        "a.py",
+        "l1\n",
+        datetime(2026, 9, 20, 1, 0, tzinfo=tz_plus8),
+        "late night +0800",
+    )
+    workdir = repo.working_tree_dir
+    assert workdir is not None
+    result = commit_frequency(Path(workdir), group_by="day")
+    assert "2026-09-19" in result.counts
+    assert "2026-09-20" not in result.counts
+    repo.close()

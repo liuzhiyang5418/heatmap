@@ -19,10 +19,10 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-from githotmap.core.git import _iter_file_changes, _open_repo
+from githotmap.core.git import _iter_file_changes, _normalize_since, _open_repo
 
 # ---------------------------------------------------------------------------
 # 数据类
@@ -92,10 +92,12 @@ def top_contributors(
 
     kwargs: dict = {}
     if since:
-        kwargs["since"] = since
+        kwargs["since"] = _normalize_since(since)
 
     with _open_repo(repo_path) as repo:
         for commit in repo.iter_commits(**kwargs):
+            if len(commit.parents) > 1:
+                continue
             key = (commit.author.name, commit.author.email)
             agg[key]["commits"] += 1
             for _, stats in _iter_file_changes(commit):
@@ -185,6 +187,8 @@ def knowledge_islands(
 
     with _open_repo(repo_path) as repo:
         for commit in repo.iter_commits():
+            if len(commit.parents) > 1:
+                continue
             author = commit.author.name
             for path, stats in _iter_file_changes(commit):
                 churn = stats.get("insertions", 0) + stats.get("deletions", 0)
@@ -227,6 +231,8 @@ def file_ownership(repo_path: str | Path, top_n: int = 100) -> list[FileOwnershi
 
     with _open_repo(repo_path) as repo:
         for commit in repo.iter_commits():
+            if len(commit.parents) > 1:
+                continue
             author = commit.author.name
             for path, stats in _iter_file_changes(commit):
                 churn = stats.get("insertions", 0) + stats.get("deletions", 0)
@@ -268,12 +274,15 @@ def commit_frequency(
     """
     kwargs: dict = {}
     if since:
-        kwargs["since"] = since
+        kwargs["since"] = _normalize_since(since)
 
     counter: Counter[str] = Counter()
     with _open_repo(repo_path) as repo:
         for commit in repo.iter_commits(**kwargs):
-            dt = commit.committed_datetime
+            if len(commit.parents) > 1:
+                continue
+            # 统一按 UTC 分组，避免提交自身时区与 --since/年龄口径不一致（M4-4）
+            dt = commit.committed_datetime.astimezone(timezone.utc)
             if group_by == "day":
                 key = dt.strftime("%Y-%m-%d")
             elif group_by == "hour":

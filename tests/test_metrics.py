@@ -36,9 +36,9 @@ def test_decay_weight() -> None:
 
 def test_aggregate_metrics() -> None:
     records = [
-        CommitRecord("alice", NOW - 1 * DAY, "a.py", 10, 2),
-        CommitRecord("alice", NOW - 10 * DAY, "a.py", 5, 0),
-        CommitRecord("bob", NOW - 200 * DAY, "b.py", 1, 1),
+        CommitRecord(commit_hash="h1", author="alice", timestamp=NOW - 1 * DAY, file_path="a.py", added=10, deleted=2),
+        CommitRecord(commit_hash="h2", author="alice", timestamp=NOW - 10 * DAY, file_path="a.py", added=5, deleted=0),
+        CommitRecord(commit_hash="h3", author="bob", timestamp=NOW - 200 * DAY, file_path="b.py", added=1, deleted=1),
     ]
     metrics = aggregate_file_metrics(records, now=NOW, recent_window_days=90.0)
 

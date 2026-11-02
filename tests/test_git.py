@@ -6,18 +6,18 @@ from pathlib import Path
 
 import git as _git
 
-from githotmap.core.git import CommitRecord, GitHistory
+from githotmap.core.git import CommitRecord, GitHistory, _normalize_since
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_commit_record_churn() -> None:
-    r = CommitRecord(author="Alice", timestamp=1700000000, file_path="a.py", added=10, deleted=2)
+    r = CommitRecord(commit_hash="abc123", author="Alice", timestamp=1700000000, file_path="a.py", added=10, deleted=2)
     assert r.churn == 12
 
 
 def test_commit_record_zero_churn() -> None:
-    r = CommitRecord(author="Bob", timestamp=1700000000, file_path="b.bin", added=0, deleted=0)
+    r = CommitRecord(commit_hash="abc123", author="Bob", timestamp=1700000000, file_path="b.bin", added=0, deleted=0)
     assert r.churn == 0
 
 
@@ -53,7 +53,7 @@ def test_git_history_returns_deduplicated_files_per_commit() -> None:
     records = history.collect(_REPO_ROOT)
     seen = set()
     for r in records:
-        key = (r.author, r.timestamp, r.file_path)
+        key = (r.commit_hash, r.author, r.timestamp, r.file_path)
         assert key not in seen, f"duplicate: {key}"
         seen.add(key)
 
@@ -108,3 +108,51 @@ def test_git_history_survives_shallow_clone(tmp_path: Path) -> None:
     # 关键断言：不抛异常；浅克隆边界提交的改动被降级，返回合法列表。
     assert isinstance(records, list)
     src.close()
+
+
+def test_normalize_since_bare_date() -> None:
+    """M4-1 回归：裸日期应补成显式 UTC 零点，而不是交给 git 补当天当前时刻。"""
+    assert _normalize_since("2026-09-17") == "2026-09-17 00:00:00 +0000"
+
+
+def test_normalize_since_full_timestamp_unchanged() -> None:
+    """完整时间戳（ISO/Z 后缀）不应被改写。"""
+    assert _normalize_since("2026-09-20T00:00:00Z") == "2026-09-20T00:00:00Z"
+
+
+def test_normalize_since_none_returns_none() -> None:
+    assert _normalize_since(None) is None
+
+
+def test_git_history_skips_merge_commits(tmp_path: Path) -> None:
+    """M4-5 回归：merge 提交不应把带入分支的改动计给 merge 者。
+
+    构造 master 与 feature 分叉后 merge，产生的 merge commit 应被采集层跳过，
+    其 churn 不会进入任何记录。
+    """
+    repo = _git.Repo.init(tmp_path / "repo")
+    workdir = repo.working_tree_dir
+    assert workdir is not None
+
+    def commit_file(name: str, content: str, message: str) -> None:
+        (Path(workdir) / name).write_text(content, encoding="utf-8")
+        repo.index.add([name])
+        actor = _git.Actor("alice", "alice@example.com")
+        repo.index.commit(message, author=actor, committer=actor)
+
+    commit_file("a.py", "l1\n", "c1 on master")
+    repo.git.checkout("-b", "feature")
+    commit_file("b.py", "l1\n", "c2 on feature")
+    repo.git.checkout("master")
+    commit_file("c.py", "l1\n", "c3 on master")
+
+    # feature 与 master 已分叉，merge 会生成一个双父 merge commit
+    repo.git.merge("feature")
+    merge_commit = repo.head.commit
+    assert len(merge_commit.parents) == 2
+
+    records = GitHistory().collect(workdir)
+    hashes = {r.commit_hash for r in records}
+    assert merge_commit.hexsha not in hashes
+    assert hashes, "非 merge 提交仍应被采集"
+    repo.close()
