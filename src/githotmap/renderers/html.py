@@ -33,6 +33,8 @@ _HTML_TEMPLATE = """<!doctype html>
   .legend { display:flex; align-items:center; gap:10px; margin-top:12px; font-size:12px; color:var(--muted); }
   .legend .bar { width:180px; height:10px; border-radius:5px;
                  background:linear-gradient(90deg, hsl(120,70%,45%), hsl(60,70%,45%), hsl(0,70%,45%)); }
+  .legend { flex-wrap:wrap; }
+  .note { color:var(--muted); font-size:12px; }
   main { padding:20px 28px 40px; }
   #heatmap { display:flex; flex-wrap:wrap; gap:3px; min-height:160px; }
   .cell { flex-basis:70px; flex-grow:1; height:26px; border-radius:3px; cursor:pointer;
@@ -60,9 +62,10 @@ _HTML_TEMPLATE = """<!doctype html>
   <h1>Git 技术债热力图</h1>
   <div class="meta" id="meta"></div>
   <div class="legend">
-    <span>低风险</span><div class="bar"></div><span>高风险</span>
+    <span>低分</span><div class="bar"></div><span>高分</span><span>灰色：空文件或数据缺失</span>
     <span style="margin-left:16px">色块面积 ≈ 代码行数（LOC）</span>
   </div>
+  <p class="note">分数是待人工复核的候选信号；当前模型将空文件和文件数据缺失都标为 missing。状态不代表扫描完整，样本置信度是基于提交次数的启发值，不是概率。</p>
 </header>
 <main>
   <div class="panel"><div id="heatmap"></div></div>
@@ -74,10 +77,12 @@ _HTML_TEMPLATE = """<!doctype html>
         <th data-key="mode_score">分数</th>
         <th data-key="commits">提交</th>
         <th data-key="churn">改动量</th>
-        <th data-key="contributors">贡献者</th>
+        <th data-key="unique_contributors">贡献者</th>
         <th data-key="gini">Gini</th>
         <th data-key="age_days">年龄(天)</th>
-        <th data-key="loc">LOC</th>
+        <th data-key="lines_of_code">LOC</th>
+        <th>数据状态</th>
+        <th data-key="confidence">样本置信度</th>
         <th>评分理由</th>
       </tr></thead>
       <tbody id="tbody"></tbody>
@@ -107,6 +112,19 @@ function reasonsOf(f) {
   return list;
 }
 
+function statusText(f) {
+  if (f.status === 'missing') return '空文件或数据缺失';
+  if (f.status === 'low_confidence') return '样本较少';
+  return f.status === 'ok' || !f.status ? '未标记异常' : String(f.status);
+}
+
+function textElement(tag, text, className = '') {
+  const el = document.createElement(tag);
+  el.textContent = text;
+  if (className) el.className = className;
+  return el;
+}
+
 function renderMeta() {
   const n = (DATA.files || []).length;
   const el = document.getElementById('meta');
@@ -115,12 +133,19 @@ function renderMeta() {
 
 function showTooltip(anchor, f) {
   const tip = document.getElementById('tooltip');
-  const reasons = reasonsOf(f).map(r => `<li>${r}</li>`).join('');
-  tip.innerHTML = `<div class="p">${f.path}</div>` +
-    `<div class="s">${fmt(f.mode_score)} / 100</div>` +
-    `<div>提交 ${fmt(f.metrics.commits)} · 改动 ${fmt(f.metrics.churn)} · ` +
-    `贡献者 ${fmt(f.metrics.unique_contributors)} · LOC ${fmt(f.metrics.lines_of_code)}</div>` +
-    (reasons ? `<ul>${reasons}</ul>` : '');
+  tip.replaceChildren();
+  tip.appendChild(textElement('div', f.path, 'p'));
+  tip.appendChild(textElement('div', f.status === 'missing' ? '分数不可用' : `${fmt(f.mode_score)} / 100`, 's'));
+  tip.appendChild(textElement('div', `状态：${statusText(f)} · 样本置信度：${fmt(f.confidence)}`));
+  tip.appendChild(textElement('div',
+    `提交 ${fmt(f.metrics.commits)} · 改动 ${fmt(f.metrics.churn)} · ` +
+    `贡献者 ${fmt(f.metrics.unique_contributors)} · LOC ${fmt(f.metrics.lines_of_code)}`));
+  const reasons = reasonsOf(f);
+  if (reasons.length) {
+    const list = document.createElement('ul');
+    reasons.forEach(reason => list.appendChild(textElement('li', reason)));
+    tip.appendChild(list);
+  }
   tip.style.display = 'block';
   moveTooltip();
   function moveTooltip() {
@@ -147,24 +172,29 @@ document.addEventListener('mousemove', e => {
 function renderHeatmap(files) {
   const container = document.getElementById('heatmap');
   container.innerHTML = '';
-  files.forEach((f, i) => {
+  files.forEach(f => {
     const cell = document.createElement('div');
     cell.className = 'cell';
     const loc = Number(f.metrics.lines_of_code) || 1;
     cell.style.flexGrow = Math.max(loc, 1);
-    cell.style.background = scoreColor(f.mode_score);
-    cell.dataset.index = i;
+    cell.style.background = f.status === 'missing' ? '#777f8b' : scoreColor(f.mode_score);
+    cell.dataset.path = f.path;
     cell.addEventListener('mouseenter', () => showTooltip(cell, f));
     cell.addEventListener('mouseleave', hideTooltip);
-    cell.addEventListener('click', () => highlightRow(i));
+    cell.addEventListener('click', () => highlightRow(f.path));
     container.appendChild(cell);
   });
 }
 
-function highlightRow(index) {
+function highlightRow(path) {
   const rows = document.querySelectorAll('#tbody tr');
-  rows.forEach((row, i) => row.style.background = i === index ? '#24304d' : '');
-  if (rows[index]) rows[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  let selected = null;
+  rows.forEach(row => {
+    const match = row.dataset.path === path;
+    row.style.background = match ? '#24304d' : '';
+    if (match) selected = row;
+  });
+  if (selected) selected.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 let sortKey = 'mode_score';
@@ -175,25 +205,23 @@ function renderTable(files) {
   const ordered = [...files].sort((a, b) => {
     const va = a[sortKey] !== undefined ? a[sortKey] : a.metrics[sortKey];
     const vb = b[sortKey] !== undefined ? b[sortKey] : b.metrics[sortKey];
+    if (sortKey === 'path') {
+      const order = String(va).localeCompare(String(vb));
+      return sortDesc ? -order : order;
+    }
     const na = Number(va) || 0, nb = Number(vb) || 0;
     return sortDesc ? nb - na : na - nb;
   });
   tbody.innerHTML = '';
-  ordered.forEach((f, i) => {
+  ordered.forEach(f => {
     const tr = document.createElement('tr');
-    const reasons = reasonsOf(f).join('; ');
-    tr.innerHTML =
-      `<td class="path">${f.path}</td>` +
-      `<td>${fmt(f.mode_score)}</td>` +
-      `<td>${fmt(f.metrics.commits)}</td>` +
-      `<td>${fmt(f.metrics.churn)}</td>` +
-      `<td>${fmt(f.metrics.unique_contributors)}</td>` +
-      `<td>${fmt(f.metrics.gini)}</td>` +
-      `<td>${fmt(f.metrics.age_days)}</td>` +
-      `<td>${fmt(f.metrics.lines_of_code)}</td>` +
-      `<td>${reasons}</td>`;
+    tr.dataset.path = f.path;
+    const values = [f.path, f.status === 'missing' ? '-' : fmt(f.mode_score), fmt(f.metrics.commits), fmt(f.metrics.churn),
+      fmt(f.metrics.unique_contributors), fmt(f.metrics.gini), fmt(f.metrics.age_days),
+      fmt(f.metrics.lines_of_code), statusText(f), fmt(f.confidence), reasonsOf(f).join('; ')];
+    values.forEach((value, index) => tr.appendChild(textElement('td', value, index === 0 ? 'path' : '')));
     tr.addEventListener('mouseenter', () => {
-      const cell = document.querySelector(`.cell[data-index="${i}"]`);
+      const cell = [...document.querySelectorAll('.cell')].find(item => item.dataset.path === f.path);
       if (cell) showTooltip(cell, f);
     });
     tr.addEventListener('mouseleave', hideTooltip);
@@ -206,7 +234,7 @@ function wireSort() {
     th.addEventListener('click', () => {
       const key = th.dataset.key;
       if (!key) return;
-      if (sortKey === key) sortDesc = !sortDesc; else { sortKey = key; sortDesc = true; }
+      if (sortKey === key) sortDesc = !sortDesc; else { sortKey = key; sortDesc = key !== 'path'; }
       renderTable(DATA.files || []);
     });
   });
