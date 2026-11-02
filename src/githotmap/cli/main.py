@@ -52,8 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="排除路径模式，可重复（如 '**/node_modules/'）",
     )
 
-    serve = sub.add_parser("serve", help="在本机启动简单的 Web 看板（需安装 web 依赖）")
-    serve.add_argument("--port", type=int, default=5000, help="本机端口（默认 5000）")
+    serve = sub.add_parser("serve", help="Start a local web dashboard (requires the web extra)")
+    serve.add_argument("--port", type=int, default=5000, help="Local port (default: 5000)")
 
     history = sub.add_parser("history", help="历史数据分析（贡献者/分支/知识孤岛）")
     history.add_argument("--repo-path", default=".", help="Git 仓库路径（默认当前目录）")
@@ -204,14 +204,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_history(args)
     if args.command == "serve":
         if not 1 <= args.port <= 65535:
-            print("端口必须介于 1 和 65535 之间", file=sys.stderr)
+            print("Port must be between 1 and 65535", file=sys.stderr)
             return 2
         try:
             from githotmap.web.app import create_app
         except ModuleNotFoundError as exc:
             if exc.name != "flask":
                 raise
-            print('请先安装 Web 依赖：pip install -e ".[web]"', file=sys.stderr)
+            print('Install the web extra first: pip install -e ".[web]"', file=sys.stderr)
             return 2
         create_app().run(host="127.0.0.1", port=args.port, debug=False)
         return 0
