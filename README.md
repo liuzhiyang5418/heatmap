@@ -1,132 +1,112 @@
-# githotmap —— Git 技术债热力图与优先级排序工具
+# githotmap — Git Technical Debt Heatmap and Prioritization
 
-把 Git 提交历史元数据转化为**可量化、可排序、可可视化**的技术债信号，帮助开发团队
-"看见"代码库中的风险分布，并据其优先级安排重构与知识传递。
+githotmap turns Git commit metadata into measurable, sortable, visual signals that help teams inspect the distribution of potential maintenance hotspots and discuss refactoring and knowledge-sharing priorities.
 
-> CS5351 软件工程课程项目（小组选题：Git 技术债热力图与优先级排序工具）。
-> 本项目为 Python 实现的**独立 CLI 工具**，核心引擎与渲染/宿主解耦，可插拔扩展。
+This is a CS5351 software engineering group project. It is a standalone Python CLI with a core engine separated from its renderers and hosts.
 
-## 核心思路
+## Approach
 
-不同于传统 linter 或团队速率指标，本工具分析的是**开发行为**：
+The tool analyzes development activity alongside file structure and size:
 
-```
-Git 历史
-   │  GitPython 遍历提交并读取每次提交的文件统计
+```text
+Git history
+   │  GitPython traverses commits and reads per-file statistics
    ▼
-原始提交记录  ──►  指标聚合（commits / churn / 贡献者 Gini / 年龄 / 大小 / LOC / 近因衰减）
+Raw commits ──► Aggregated metrics (commits, churn, contributor Gini, age, size, LOC, recency decay)
    │
    ▼
-评分引擎（4 种模式 + 3 种复合模式，0–100 分 + 分解 + 自然语言理由）
+Scoring engine (4 modes + 3 composite modes; scores from 0–100, breakdowns, and explanations)
    │
    ▼
-优先级排序  ──►  渲染层（默认交互式 HTML 热力图，可插拔替换）
+Prioritized files ──► Renderer (interactive HTML heatmap by default; replaceable)
 ```
 
-## 评分模式
+## Scoring modes
 
-| 模式 | 目标 | 关键信号 |
-|------|------|----------|
-| `hot` | 活动热点（近期高频改动/波动） | 近期提交、churn、活跃开发 |
-| `risk` | 知识风险 / 公交因子 | 贡献者集中、所有权不均、知识孤岛 |
-| `complexity` | 技术债候选 | 大、老、维护负担高的文件 |
-| `roi` | 重构优先级 | 大文件上的高 churn（技术影响 vs 投入） |
+| Mode | Purpose | Main signals |
+|---|---|---|
+| `hot` | Activity hotspots | Recent commits, churn, active development |
+| `risk` | Knowledge concentration and bus-factor risk | Contributor concentration, uneven ownership, potential knowledge silos |
+| `complexity` | Technical-debt candidates | Large, old files with maintenance activity |
+| `roi` | Heuristic refactoring priority | High churn on large files |
 
-复合模式（融合多维风险）：
+Composite modes:
 
-| 模式 | 配比 | 适用 |
-|------|------|------|
-| `active_owners` | hot 50% + risk 50% | 活跃改动且知识孤岛 → 优先知识传递 |
-| `refactor_now` | complexity 60% + roi 40% | 冲刺规划 → 按重构回报排序 |
-| `legacy_debt` | complexity 70% + risk 30% | 变更前审计 → 脆弱且集中的遗留系统 |
+| Mode | Weights | Intended use |
+|---|---|---|
+| `active_owners` | hot 50% + risk 50% | Identify active changes with concentrated ownership for knowledge sharing |
+| `refactor_now` | complexity 60% + roi 40% | Discuss refactoring priority during sprint planning |
+| `legacy_debt` | complexity 70% + risk 30% | Inspect concentrated legacy areas before change |
 
-每个文件结果附带 `recency_signal` 与动态阈值，用于区分
-**当前活跃热点（Active Frontier）** 与 **历史热点（Historical Hotspot）**，避免把陈旧数据误判为当前风险。
+Each file result includes `recency_signal` and dynamic thresholds to help distinguish an active frontier from a historical hotspot.
 
-## 快速开始
+## Quick start
 
 ```bash
-# 安装（开发模式）
+# Install in editable mode
 cd heatmap
 pip install -e .
 
-# 安装后也可直接以模块运行
+# Run as a module after installation
 python -m githotmap analyze --repo-path . --mode roi --output html --output-file heatmap.html
 
-# 输出机器可读结果（包含指标、分数分解和状态）
+# Export machine-readable metrics, score breakdowns, and statuses
 python -m githotmap analyze --repo-path . --mode roi --output json --output-file heatmap.json
 
-# 查看帮助
+# Show help
 python -m githotmap --help
 python -m githotmap analyze --help
 ```
 
-生成的 `heatmap.html` 为**自包含交互式热力图**（无外部 CDN，可离线打开）：悬停查看
-文件详情与评分理由，点击表头切换排序；色块面积近似反映 LOC，颜色反映当前模式的分数。
-灰色表示模型中的 `missing` 状态；目前空文件和缺失文件使用同一个状态，须人工复核。
+The generated `heatmap.html` is a self-contained interactive report with no external CDN. Hover over a cell for file details and scoring explanations; click table headers to sort. Cell area approximately reflects LOC and color reflects the selected mode's score. Gray indicates the model's `missing` status, which currently combines empty and missing files and requires manual review.
 
-### 本机 Web 入口
+### Local web entry point
 
 ```bash
 pip install -e '.[web]'
 githotmap serve --port 5000
 ```
 
-在浏览器打开 `http://127.0.0.1:5000`，输入本机 Git 仓库路径并选择模式。此入口同步调用
-现有分析流水线并展示 HTML 报告，只绑定本机；不是托管服务，也没有后台任务、目录筛选或上传功能。
-不安装 `web` 可继续使用 CLI 和离线报告。
+Open `http://127.0.0.1:5000`, enter a local Git repository path, and select a mode. The form invokes the existing pipeline synchronously and displays the HTML report. It binds to loopback and has no background jobs, directory filtering, or upload support. The CLI and offline report work without the `web` extra.
 
-## 目录结构
+## Repository layout
 
-```
+```text
 heatmap/
-├── pyproject.toml              # 打包元数据与工具配置
+├── pyproject.toml              # Packaging and tool configuration
 ├── README.md
 ├── src/githotmap/
-│   ├── __init__.py             # 版本与公开 API
-│   ├── __main__.py             # python -m githotmap 入口
-│   ├── cli/main.py             # argparse CLI（analyze / version）
-│   ├── core/
-│   │   ├── models.py           # 领域模型：枚举、FileMetrics、FileResult、AnalysisResult
-│   │   ├── git.py              # Git 采集：单次 log 遍历 + 解析器
-│   │   ├── metrics.py          # 指标聚合：Gini、指数衰减、归一化常量
-│   │   ├── scoring.py          # 四模式评分 + 复合评分 + 理由生成
-│   │   ├── ranking.py          # 优先级排序
-│   │   └── pipeline.py         # 采集→指标→评分→排序→渲染 编排
-│   ├── renderers/
-│   │   ├── base.py             # Renderer 抽象协议
-│   │   ├── registry.py         # 渲染器注册表（可插拔）
-│   │   └── html.py             # 交互式 HTML 热力图渲染器（默认）
-│   ├── config/config.py        # 默认权重 / 阈值 / 预设
-│   └── plugins/base.py         # 后续插件扩展协议（预留）
-├── tests/                      # 单元测试与样例 fixture
-└── examples/demo.py            # 编程式调用示例
+│   ├── __init__.py             # Version and public API
+│   ├── __main__.py             # python -m githotmap entry point
+│   ├── cli/main.py             # argparse CLI
+│   ├── core/                   # Models, Git collection, metrics, scoring, ranking, pipeline
+│   ├── renderers/              # Renderer protocol, registry, HTML, and JSON
+│   ├── web/                    # Optional local Flask entry point
+│   ├── config/config.py        # Default weights, thresholds, and presets
+│   └── plugins/base.py         # Reserved plugin extension protocol
+├── tests/                      # Unit and system tests and fixtures
+└── examples/demo.py            # Programmatic usage example
 ```
 
-## 架构与可插拔性
+## Architecture and extensibility
 
-核心引擎（`core/`）**不依赖**任何渲染或宿主，只产出结构化数据
-（`AnalysisResult`）。渲染层通过 `renderers.base.Renderer` 协议接入，经
-`renderers.registry` 按名称注册/查找。新增输出格式（SVG、终端矩阵、JSON、CSV 等）
-只需实现 `Renderer` 并注册，无需改动核心逻辑——这正是"可插拔输出层"的落点。
+The core engine (`core/`) produces structured `AnalysisResult` data without depending on a renderer or host. Renderers implement `renderers.base.Renderer` and are registered and selected through `renderers.registry`. New formats can be added through that protocol without changing the core pipeline.
 
-## 开发
+## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest                 # 运行测试
-ruff check src tests   # 静态检查
-mypy src               # 类型检查
+pip install -e '.[dev]'
+pytest                 # Run tests
+ruff check src tests   # Lint
+mypy src               # Type check
 ```
 
-如需运行浏览器交互测试，设置 `HEATMAP_CHROME` 为本机 Chrome/Chromium 可执行文件路径后再运行
-`pytest tests/test_html_browser.py`。该测试需要允许启动独立的无头浏览器。
+To run the browser interaction test, set `HEATMAP_CHROME` to a local Chrome or Chromium executable and run `pytest tests/test_html_browser.py`. The environment must permit launching a separate headless browser.
 
-Sprint 1 的用户故事、架构候选、验收状态和待团队确认事项见 [Sprint 1 记录](docs/sprint-1.md)。
+The [Sprint 1 record](docs/sprint-1.md) covers user stories, proposed architecture, acceptance status, and team decisions still needed.
 
+## Research and evaluation
 
-## 研究依据与评价
+The [research index](docs/research/README.md) links the initial six-paper comparison, design rationale, open-source tool observations, and a planned evaluation.
 
-阶段一资料见 [研究文档入口](docs/research/README.md)：包含六篇论文对照、设计依据、开源工具观察和待执行的评价方案。
-
-当前分数是辅助检查与排序的启发式信号，不等于已确认技术债、缺陷概率、修复工时或真实投资回报。`complexity` 是融合多项信号的评分模式，不等于 AST 圈复杂度。主流水线接入了 TODO 候选数量，但尚未在报告中展示注释原文及位置；扫描或检测失败时仍可能静默回退。论文中的实验效果不代表本项目已经取得同样效果。
+Scores are heuristic signals for inspection and prioritization; they do not establish technical debt, defect probability, repair effort, or financial return. The `complexity` mode combines several signals and is not AST cyclomatic complexity. The pipeline counts TODO candidates but does not show the original comments or line numbers; scanner or detection failures can still silently fall back. Results reported in research papers are not evidence that this project achieved the same effects.
