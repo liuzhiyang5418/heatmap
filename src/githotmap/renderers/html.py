@@ -1,9 +1,7 @@
-"""交互式 HTML 热力图渲染器（默认输出）。
+"""Render a self-contained interactive HTML heatmap.
 
-生成**自包含** HTML（内嵌 CSS/JS，无外部 CDN，可离线打开）：
-
-- 面积近似映射文件规模（LOC），颜色映射风险分数（绿→红）；
-- 悬停显示文件详情与评分理由；点击表头可排序详情表格。
+Cell area approximates LOC, color represents the score, hovering displays
+details, and table headers control sorting. No external CDN is required.
 """
 
 from __future__ import annotations
@@ -15,13 +13,13 @@ from githotmap.core.models import AnalysisResult
 from githotmap.renderers.base import Renderer
 from githotmap.renderers.registry import register
 
-# 占位符将在 render() 中被序列化后的 JSON 替换。
+# The placeholder is replaced by serialized JSON in render().
 _HTML_TEMPLATE = """<!doctype html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Git 技术债热力图</title>
+<title>Git Technical Debt Heatmap</title>
 <style>
   :root { --bg:#0f1420; --panel:#181f30; --text:#e6e9f0; --muted:#8b93a7; --accent:#4ea1ff; }
   * { box-sizing: border-box; }
@@ -59,31 +57,31 @@ _HTML_TEMPLATE = """<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Git 技术债热力图</h1>
+  <h1>Git Technical Debt Heatmap</h1>
   <div class="meta" id="meta"></div>
   <div class="legend">
-    <span>低分</span><div class="bar"></div><span>高分</span><span>灰色：空文件或数据缺失</span>
-    <span style="margin-left:16px">色块面积 ≈ 代码行数（LOC）</span>
+    <span>Low score</span><div class="bar"></div><span>High score</span><span>Gray: empty file or missing data</span>
+    <span style="margin-left:16px">Cell area ≈ lines of code (LOC)</span>
   </div>
-  <p class="note">分数是待人工复核的候选信号；当前模型将空文件和文件数据缺失都标为 missing。状态不代表扫描完整，样本置信度是基于提交次数的启发值，不是概率。</p>
+  <p class="note">Scores are candidate signals for human review. The current model marks both empty files and missing file data as missing. Status does not establish scan completeness; sample confidence is a commit-count heuristic, not a probability.</p>
 </header>
 <main>
   <div class="panel"><div id="heatmap"></div></div>
   <div class="panel">
-    <h2>文件详情（点击表头排序）</h2>
+    <h2>File details (click a heading to sort)</h2>
     <table id="table">
       <thead><tr>
-        <th data-key="path">路径</th>
-        <th data-key="mode_score">分数</th>
-        <th data-key="commits">提交</th>
-        <th data-key="churn">改动量</th>
-        <th data-key="unique_contributors">贡献者</th>
+        <th data-key="path">Path</th>
+        <th data-key="mode_score">Score</th>
+        <th data-key="commits">Commits</th>
+        <th data-key="churn">Churn</th>
+        <th data-key="unique_contributors">Contributors</th>
         <th data-key="gini">Gini</th>
-        <th data-key="age_days">年龄(天)</th>
+        <th data-key="age_days">Age (days)</th>
         <th data-key="lines_of_code">LOC</th>
-        <th>数据状态</th>
-        <th data-key="confidence">样本置信度</th>
-        <th>评分理由</th>
+        <th>Data status</th>
+        <th data-key="confidence">Sample confidence</th>
+        <th>Score explanations</th>
       </tr></thead>
       <tbody id="tbody"></tbody>
     </table>
@@ -95,7 +93,7 @@ const DATA = __DATA__;
 
 function scoreColor(score) {
   const s = Math.max(0, Math.min(100, Number(score) || 0));
-  const hue = 120 * (1 - s / 100); // 120=绿 → 0=红
+  const hue = 120 * (1 - s / 100); // 120=green → 0=red
   return `hsl(${hue}, 70%, 45%)`;
 }
 
@@ -113,9 +111,9 @@ function reasonsOf(f) {
 }
 
 function statusText(f) {
-  if (f.status === 'missing') return '空文件或数据缺失';
-  if (f.status === 'low_confidence') return '样本较少';
-  return f.status === 'ok' || !f.status ? '未标记异常' : String(f.status);
+  if (f.status === 'missing') return 'Empty file or missing data';
+  if (f.status === 'low_confidence') return 'Limited sample';
+  return f.status === 'ok' || !f.status ? 'No issue flagged' : String(f.status);
 }
 
 function textElement(tag, text, className = '') {
@@ -128,18 +126,18 @@ function textElement(tag, text, className = '') {
 function renderMeta() {
   const n = (DATA.files || []).length;
   const el = document.getElementById('meta');
-  el.textContent = `仓库: ${DATA.repo_path} · 模式: ${DATA.mode} · 文件数: ${n} · 分析时间: ${DATA.analyzed_at}`;
+  el.textContent = `Repository: ${DATA.repo_path} · Mode: ${DATA.mode} · Files: ${n} · Analyzed: ${DATA.analyzed_at}`;
 }
 
 function showTooltip(anchor, f) {
   const tip = document.getElementById('tooltip');
   tip.replaceChildren();
   tip.appendChild(textElement('div', f.path, 'p'));
-  tip.appendChild(textElement('div', f.status === 'missing' ? '分数不可用' : `${fmt(f.mode_score)} / 100`, 's'));
-  tip.appendChild(textElement('div', `状态：${statusText(f)} · 样本置信度：${fmt(f.confidence)}`));
+  tip.appendChild(textElement('div', f.status === 'missing' ? 'Score unavailable' : `${fmt(f.mode_score)} / 100`, 's'));
+  tip.appendChild(textElement('div', `Status: ${statusText(f)} · Sample confidence: ${fmt(f.confidence)}`));
   tip.appendChild(textElement('div',
-    `提交 ${fmt(f.metrics.commits)} · 改动 ${fmt(f.metrics.churn)} · ` +
-    `贡献者 ${fmt(f.metrics.unique_contributors)} · LOC ${fmt(f.metrics.lines_of_code)}`));
+    `Commits ${fmt(f.metrics.commits)} · Churn ${fmt(f.metrics.churn)} · ` +
+    `Contributors ${fmt(f.metrics.unique_contributors)} · LOC ${fmt(f.metrics.lines_of_code)}`));
   const reasons = reasonsOf(f);
   if (reasons.length) {
     const list = document.createElement('ul');
@@ -252,7 +250,7 @@ wireSort();
 
 @register("html")
 class HTMLRenderer(Renderer):
-    """把分析结果渲染为自包含交互式 HTML 热力图。"""
+    """Render an analysis result as a self-contained interactive heatmap."""
 
     name = "html"
 
