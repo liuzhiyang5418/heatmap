@@ -1,66 +1,66 @@
-# Sprint 1：需求、架构与验收记录
+# Sprint 1: Requirements, Architecture, and Acceptance Record
 
-记录日期：2026-11-02（Asia/Shanghai）。主分支审查基线：[df67b8b](https://github.com/liuzhiyang5418/heatmap/commit/df67b8b5dfc2e845c8aea15fbbf69c709d267b71)，含评分修复 [PR #14](https://github.com/liuzhiyang5418/heatmap/pull/14)。本文件随工作分支提出；其中“本次新增”须经 PR 合并后才属于 main。仓库之外的会议、看板、课程提交和个人工时未核查。
+Recorded: 2026-11-02 (Asia/Shanghai). The main-branch review baseline is [df67b8b](https://github.com/liuzhiyang5418/heatmap/commit/df67b8b5dfc2e845c8aea15fbbf69c709d267b71), including the scoring fix in [PR #14](https://github.com/liuzhiyang5418/heatmap/pull/14). This record accompanies a working branch; additions described here are not on main until the PR is merged. Meetings, boards, course submissions, and individual hours outside the repository have not been verified.
 
-## 目标与范围
+## Goal and scope
 
-Sprint 1 要形成可运行的分析骨架、标准格式的用户故事、至少两项 NFR 的架构方案和测试基础。面向 Python 仓库维护者，工具使用 Git 历史及 Python 文件结构生成候选热点，提供可核查的报告；高分、TODO 候选和 ROI 名称都不是已确诊技术债、缺陷概率或财务回报。
+Sprint 1 aims to deliver a runnable analysis skeleton, user stories with acceptance criteria, architecture proposals for at least two non-functional requirements (NFRs), and a test foundation. For Python repository maintainers, the tool combines Git history with Python file structure to identify candidate hotspots and produce an inspectable report. A high score, a TODO candidate, or a mode named ROI is not proof of technical debt, a defect probability, or a financial return.
 
-Member 1 负责需求、Sprint 与文档；Member 6 负责 Dashboard、系统测试和评价。其他模块的实现或批准由相应队友参与，不以本文替代团队验收。
+Member 1 owns requirements, sprint coordination, and documentation. Member 6 owns the dashboard, system tests, and evaluation. Work on other modules and approval of team decisions remain with the relevant members; this document does not replace team acceptance.
 
-## 用户故事与状态
+## User stories and status
 
-状态按 main 基线和本次工作分别记录。故事点为本次提出的 Fibonacci 估算，需团队评估，不代表历史工时或实际完成点数。
+Statuses distinguish the main baseline from this PR. Story points are proposed Fibonacci estimates for team discussion, not historical effort or completed points.
 
-| ID | 用户故事 | 验收条件 | 优先级 / 建议点数 | 状态与证据 |
+| ID | User story | Acceptance criteria | Priority / proposed points | Status and evidence |
 |---|---|---|---|---|
-| S1-01 | 作为维护者，我希望分析本地 Git 仓库并获得文件排序，以便确定优先检查的候选。 | CLI 能选择仓库与模式；文件包含路径、原始指标、得分与解释；分析失败返回错误。 | P0 / 5 | main 已有 CLI、流水线及 HTML；详见 [CLI](../src/githotmap/cli/main.py)、[pipeline](../src/githotmap/core/pipeline.py)。两套受控仓库测试见 [系统测试](../tests/test_sprint1_system.py)。 |
-| S1-02 | 作为维护者，我希望导出机器可读结果，以便复核报告数据。 | CLI 支持 JSON 文件和标准输出；包含指标、模式、得分分解、状态；空结果可解析。 | P0 / 2 | 本次新增 [JSON 渲染器](../src/githotmap/renderers/json.py)及[测试](../tests/test_json_renderer.py)；格式未承诺跨版本兼容，也非确定性输出。 |
-| S1-03 | 作为使用者，我希望通过本机网页启动分析并查看结果。 | 表单接受本机仓库路径与已有模式；有效输入生成报告；错误可读；只绑定本机。 | P0 / 3 | 本次新增可选 [Flask 入口](../src/githotmap/web/app.py)和[测试](../tests/test_web.py)；同步运行，尚无后台任务、目录筛选或在线部署。 |
-| S1-04 | 作为使用者，我希望排序后仍能定位相同文件，并看到数据状态。 | 路径按文本排序；LOC 与贡献者列按对应字段排序；色块按路径关联表格；缺失状态不是绿色；异常路径按文本展示。 | P0 / 3 | 本次修改 [HTML 渲染器](../src/githotmap/renderers/html.py)，并增加[浏览器测试](../tests/test_html_browser.py)；浏览器测试执行状态见验收记录，尚不能将未运行的检查算作通过。当前 missing 同时涵盖空文件与缺失。 |
-| S1-05 | 作为团队成员，我希望需求、风险和验收条件可追溯。 | 每项故事有负责人范围、优先级、验收条件和证据；记录未决事项与风险。 | P0 / 3 | 本文为 M1 草案；尚未创建对应 Issue 或获得团队确认。 |
-| S1-06 | 作为团队成员，我希望修改后能执行回归测试。 | 单元、系统和浏览器检查可运行；PR 自动运行测试并呈现失败。 | P0 / 3 | 本次新增 [.github/workflows/tests.yml](../.github/workflows/tests.yml)；本地结果见下节，GitHub Actions 需远端实际运行后确认。 |
-| S1-07 | 作为维护者，我希望按提案的 C×R 基线对 Python 文件排序并导出 Top 20。 | 团队先确认公式、复杂度口径、归一化与冻结基线；固定输入下核验原始值、分解和排名。 | P0 / 5 | **未完成／需协调 M2、M4、M5**。现有 `complexity` 是多信号加权模式，不能当作提案的 C×R 公式；本次未更改评分。 |
+| S1-01 | As a maintainer, I want to analyze a local Git repository and rank files so I can choose candidates for inspection. | The CLI selects a repository and mode; each file has a path, raw metrics, a score, and an explanation; analysis failures return an error. | P0 / 5 | The baseline has a [CLI](../src/githotmap/cli/main.py), [pipeline](../src/githotmap/core/pipeline.py), and HTML output. Two controlled repositories are covered by [system tests](../tests/test_sprint1_system.py). |
+| S1-02 | As a maintainer, I want machine-readable output so I can review the report data. | The CLI writes JSON to a file or standard output, including metrics, mode, score breakdown, and status; empty results are parseable. | P0 / 2 | This PR adds a [JSON renderer](../src/githotmap/renderers/json.py) and [tests](../tests/test_json_renderer.py). Cross-version format stability and deterministic output are not yet guaranteed. |
+| S1-03 | As a user, I want to start an analysis and inspect the result from a local web page. | The form accepts a local repository path and an existing mode, renders a report for valid input, presents readable errors, and binds only to loopback. | P0 / 3 | This PR adds an optional [Flask entry point](../src/githotmap/web/app.py) and [tests](../tests/test_web.py). Analysis is synchronous; background jobs, directory filtering, and online deployment are absent. |
+| S1-04 | As a user, I want file identity and data status to remain clear after sorting. | Paths sort as text; LOC and contributor columns use their corresponding fields; cells link to rows by path; missing data is not shown as green; unusual paths display as text. | P0 / 3 | This PR updates the [HTML renderer](../src/githotmap/renderers/html.py) and adds a [browser test](../tests/test_html_browser.py). The current `missing` status covers both empty and missing files. |
+| S1-05 | As a team member, I want requirements, risks, and acceptance criteria to be traceable. | Each story states ownership scope, priority, acceptance criteria, and evidence; open decisions and risks are recorded. | P0 / 3 | This is an M1 draft; corresponding issues and team confirmation have not been verified. |
+| S1-06 | As a team member, I want regression checks to run after changes. | Unit, system, and browser checks can run; a PR workflow runs tests and reports failures. | P0 / 3 | This PR adds [.github/workflows/tests.yml](../.github/workflows/tests.yml). Test evidence and its limits are recorded below. |
+| S1-07 | As a maintainer, I want to rank Python files with the proposal's C×R baseline and export the top 20. | The team agrees the formula, complexity definition, normalization, and frozen baseline; fixed inputs are checked for raw values, breakdown, and ranking. | P0 / 5 | **Incomplete; coordination with M2, M4, and M5 is needed.** The current `complexity` mode combines weighted signals and is not the proposed C×R formula. This PR does not change scoring. |
 
-## NFR 架构草案
+## NFR architecture proposals
 
-截图提出性能、健壮可审计和可复现三项候选。以下优先细化后两项以满足至少两项 NFR 的设计需求，是否采纳及阈值仍需团队确认。它们目前均未通过完整验收。
+The supplied requirements identify performance, robustness and auditability, and reproducibility as candidates. The latter two are elaborated below. Adoption and thresholds require team agreement, and none has passed complete acceptance.
 
-### NFR-2：健壮性与可审计性
+### NFR-2: Robustness and auditability
 
-- 场景与候选指标：对约定的 12 类损坏或边界输入分别执行测试；默认模式不崩溃，降级与跳过原因可追踪；严格模式将约定的降级转为非零退出码。实际 12 类、分母和平台应在测试前冻结。
-- 备选 A：异常直接终止。实现简单，但不能提供其他可分析文件的结果。
-- 建议 B：默认尽力返回，同时从 scanner/TODO/Git 模块传递机器可读原因码与覆盖计数，经 `AnalysisResult` 到 HTML/JSON；另提供严格模式。代价是需要跨 M2–M6 约定状态和错误语义。
-- 当前差距：scanner 已有 `limitations` 和 `ScanStats`，但 [pipeline](../src/githotmap/core/pipeline.py) 对 scanner/TODO 异常会静默回退；本次只展示已有 `status`/`confidence`，没有完成覆盖率及原因传播。`size_bytes == 0` 不能区分空文件和缺失。
-- 拟验收：逐类断言退出行为、原因码、计数及 HTML/JSON 一致性，并保存失败样本；尚未执行。
+- Scenario and candidate measures: test each of 12 agreed fault or boundary classes; default mode should not crash and should expose degradation or skip reasons; strict mode should return a nonzero exit code for agreed degradations. Freeze the actual classes, denominator, and platforms before testing.
+- Alternative A: fail immediately on an exception. This is simpler but cannot return results for other analyzable files.
+- Proposed B: return best-effort results by default and propagate machine-readable reason codes and coverage counts from scanner, TODO, and Git modules through `AnalysisResult` to HTML/JSON; offer a separate strict mode. This requires M2–M6 to agree status and error semantics.
+- Current gap: scanner has `limitations` and `ScanStats`, but the [pipeline](../src/githotmap/core/pipeline.py) can silently fall back on scanner or TODO exceptions. This PR displays existing `status` and `confidence`; coverage and reason propagation remain incomplete. `size_bytes == 0` does not distinguish an empty file from missing data.
+- Proposed acceptance: assert exit behavior, reason codes, counts, and HTML/JSON consistency for each class, and retain failing samples. This has not been executed.
 
-### NFR-3：可复现与可验证
+### NFR-3: Reproducibility and verifiability
 
-- 场景与候选指标：固定仓库提交、工作区、参数、评分配置、时钟、工具版本和平台后，两次规范化结果一致；跨 Windows/Linux 在同一约定下比较；记录格式版本及基线哈希。
-- 备选 A：比较前只删除分析时间。改动小，但计算指标也依赖当前时间，单删时间字段不足以保证一致。
-- 建议 B：注入固定分析时钟，冻结输入与配置，对排序、路径和序列化定义规则；保存版本、基线和预期哈希。代价是需要核心模块配合并维护基线变更记录。
-- 当前差距：结果含 `analyzed_at`，部分指标依赖当前时间；没有确定性序列化契约、跨平台实验或冻结哈希。本次 JSON 只是数据导出，不能作为复现验收证据。
-- 拟验收：用至少三个固定仓库快照双跑比较规范化输出及哈希，再用跨平台 CI 验证；尚未执行。
+- Scenario and candidate measures: after fixing the repository commit, worktree, parameters, scoring configuration, clock, tool version, and platform, two normalized outputs should match; compare Windows and Linux under an agreed contract and record the format version and baseline hash.
+- Alternative A: remove only the analysis timestamp before comparison. This is a small change, but metrics can depend on the current time, so it is insufficient by itself.
+- Proposed B: inject a fixed analysis clock; freeze inputs and configuration; define sorting, path, and serialization rules; and retain versions, baselines, and expected hashes. Core-module changes and a baseline change log are required.
+- Current gap: results contain `analyzed_at` and some metrics depend on the current time. There is no deterministic serialization contract, cross-platform experiment, or frozen hash. JSON export in this PR is not reproducibility acceptance evidence.
+- Proposed acceptance: run each of at least three frozen repository snapshots twice, compare normalized outputs and hashes, then validate in cross-platform CI. This has not been executed.
 
-### NFR-1：性能与规模（候选）
+### NFR-1: Performance and scale (candidate)
 
-截图提出 3000 文件不超过 5 秒等目标；尚未在当前基线按固定数据与机器环境复测。应先固定仓库规模、提交历史、硬件、运行次数及内存测量方法，再比较冷/热运行；优化和数值承诺需 M4/M5 参与。
+The supplied requirements propose targets including 3,000 files within five seconds. These have not been remeasured on the current baseline with fixed data and hardware. First freeze repository size, commit history, hardware, repetition count, and memory measurement method; then compare cold and warm runs. M4 and M5 should participate in optimization and target decisions.
 
-## 测试与证据
+## Tests and evidence
 
-- 本地基线：从 main 文件快照建立独立测试仓库，并加入空提交以满足现有测试对两次提交的假设；原有 149 项通过。该测试仓库历史为测试构造，不是 GitHub 原始历史。
-- 本次自动化：同步 `df67b8b` 后，macOS、Python 3.11 本地 **161 项通过、1 项跳过**；包含两个合成 Git 仓库的 CLI 到 JSON/HTML、Flask 测试客户端到真实流水线，以及 Node 模拟 DOM 的排序和联动检查。合成数据不能代替真实项目验证；模拟 DOM 不能代替真实浏览器。
-- 本机尝试启动无头 Chrome 时进程无法启动，浏览器检查因此未通过本地实测；默认测试将其标为跳过。该检查需要设置 `HEATMAP_CHROME` 并允许启动无头浏览器；CI 工作流包含该步骤，但只有实际运行成功后才能算通过。
-- [研究评价计划](research/evaluation-plan.md)仍为待执行方案；没有参与者结果，也没有性能、NFR 达标或评分准确率结论。
+- Local baseline: a separate test repository was built from a main-file snapshot, with an additional empty commit to satisfy an existing two-commit test assumption; 149 existing tests passed. This constructed history is not the original GitHub history.
+- Sprint 1 changes at `9516f15`: macOS / Python 3.11 produced **161 passed and 1 skipped**, including CLI-to-JSON/HTML tests using two synthetic Git repositories, a Flask test client exercising the real pipeline, and Node-based DOM simulation for sorting and linking. Synthetic data does not replace real-project validation; a simulated DOM does not replace a real browser.
+- Local headless Chrome could not start, so the local browser test was skipped. It requires `HEATMAP_CHROME` and permission to launch a headless browser. On GitHub Actions, the [push run](https://github.com/liuzhiyang5418/heatmap/actions/runs/41438335271) for `9516f15` passed on Linux with Python 3.10, 3.11, and 3.12, including the Chrome interaction test. Check the current PR checks for subsequent commits.
+- The [research evaluation plan](research/evaluation-plan.md) remains a plan. There are no participant results or conclusions establishing performance, NFR compliance, or scoring accuracy.
 
-## 风险和待确认事项
+## Risks and open decisions
 
-| 项目 | 影响 | 下一步 / 相关负责人 |
+| Item | Impact | Next step / relevant members |
 |---|---|---|
-| 提案与实现不一致：提案要求 C×R、固定基线及扩展 churnmap；当前仓库采用多模式加权评分 | 不能声称完全满足提案的排序验收或算法复现 | M1 组织决定实际范围；M2/M4/M5 核对指标和公式，保留决策记录 |
-| 扫描、TODO 失败静默降级；空文件与缺失共用状态 | 用户可能把不可分析文件误读为低风险 | M2/M3/M5 提供原因与状态，M6 展示并测试 |
-| Flask 同步分析大仓库可能长时间无响应 | 影响使用体验 | M6 测量后再决定进度提示/后台任务；不宣称已有性能保证 |
-| 真实仓库验证、用户实验和跨平台检查缺失 | Sprint 退出条件尚无充分证据 | M1/M6 与团队选择两个真实固定版本及验收人，记录命令、结果和问题 |
-| 会议、燃尽图、贡献记录及正式验收未见仓库证据 | 无法据此回填历史进度 | M1 收集团队已有真实记录；缺失部分从现在开始记录，不编造 |
+| The proposal calls for C×R, a frozen baseline, and a churnmap extension; the repository uses weighted scoring modes. | Full acceptance of the proposed ranking and algorithm reproduction cannot be claimed. | M1 coordinates a scope decision; M2/M4/M5 review metrics and formula and record the decision. |
+| Scanner and TODO failures can silently degrade; empty files and missing data share a status. | Users may mistake an unanalyzable file for a low-risk file. | M2/M3/M5 provide reasons and statuses; M6 displays and tests them. |
+| Synchronous Flask analysis may take a long time for a large repository. | The interface may appear unresponsive. | M6 measures the behavior before deciding on progress feedback or background work; no performance guarantee is claimed. |
+| Real-repository validation, user studies, and cross-platform checks are missing. | There is insufficient evidence for the sprint exit criteria. | M1/M6 and the team select two fixed real-repository versions and reviewers, then record commands, results, and issues. |
+| Meetings, a burndown chart, contribution records, and formal acceptance are not evidenced in the repository. | Historical progress cannot be reconstructed reliably from this snapshot. | M1 collects existing records and records missing information prospectively rather than inventing it. |
 
-**退出状态：部分完成，待团队 review、真实仓库演示、未决评分范围及实际 CI 结果。** 可用的代码或测试不等于全部 Sprint 1 已获团队验收。
+**Exit status: partially complete.** Team review, real-repository demonstrations, a scoring-scope decision, and sprint acceptance remain outstanding. Passing code checks does not by itself constitute team acceptance.
