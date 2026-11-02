@@ -1,36 +1,36 @@
-# 设计依据与实现边界
+# Design Rationale and Implementation Boundaries
 
-状态：研究与设计建议；不代表已完成用户实验。以下实现描述已对照 Sprint 1 工作分支更新；合入 main 前不代表主分支已经包含该分支新增内容。
+Status: research and design guidance; this is not evidence that a user study has been completed. The implementation description has been updated against the Sprint 1 working branch. Additions in that branch are not on main until merged.
 
-## 目标
+## Goal
 
-githotmap 将 Git 历史和文件规模转为可解释的候选信号，帮助定位维护热点、讨论检查与重构优先级。技术债需结合未来变化及成本判断，不能把所有 TODO、复杂文件或高 churn 自动确认为债务。[文献依据 P1–P6](literature-review.md)
+githotmap turns Git history and file size into explainable candidate signals to support discussion of maintenance hotspots and inspection or refactoring priorities. Technical debt also depends on future change and cost: TODOs, complex files, and high churn should not automatically be treated as confirmed debt. See the [literature review, P1–P6](literature-review.md).
 
-## 当前实现与拟扩展
+## Current implementation and proposed extensions
 
-| 项目 | 当前实现 | 拟扩展/验证事项 |
+| Area | Current implementation | Proposed extension / validation |
 |---|---|---|
-| 宿主与展示 | 独立 CLI、自包含 HTML 和 JSON；工作分支新增可选本机 Flask 入口 | 在现有 Renderer 协议内演进；Flask 入口仍是同步原型 |
-| 主流水线 | Git 采集→指标→工作区规模→结构指标和 TODO 数量→评分→排序/目录聚合 | 扫描与 TODO 失败会静默回退；详情没有保留 TODO 原文和行号 |
-| 扫描器 | scanner 提供结构、行数和解析状态；主流水线接入部分结构指标 | 使限制原因与覆盖率传播到分析结果和报告，遵循 [扫描接口](../scanner-interface.md) |
-| complexity 模式 | 综合结构、规模、年龄与维护活动等信号 | 模式名称不等于 AST 圈复杂度；评分有效性须另作验证 |
-| roi 模式 | 启发式重构优先级 | 不代表经测量的财务回报、节省工时或真实修复收益 |
-| 热力图 | 文件色块、悬浮详情、可排序表格；色块面积近似对应 LOC；工作分支显示当前 status 和 confidence | 目录层级图、路径过滤、完整的失败原因和注释证据仍为建议 |
+| Host and presentation | Standalone CLI, self-contained HTML, and JSON; the working branch adds an optional local Flask entry point. | Evolve within the existing Renderer protocol; the Flask entry point is a synchronous prototype. |
+| Main pipeline | Git collection → metrics → worktree size → structural metrics and TODO counts → scoring → ranking and directory aggregation. | Scanner and TODO failures can silently fall back; details do not retain the original TODO text and line numbers. |
+| Scanner | The scanner supplies structure, line counts, and parse status; the pipeline uses some structural metrics. | Propagate limitation reasons and coverage into analysis results and reports, following the [scanner interface](../scanner-interface.md). |
+| `complexity` mode | Combines structural, size, age, and maintenance-activity signals. | The mode name does not mean AST cyclomatic complexity; scoring validity requires separate evaluation. |
+| `roi` mode | A heuristic for refactoring priority. | It does not represent measured financial return, time saved, or actual repair benefit. |
+| Heatmap | File cells, hover details, and a sortable table; cell area approximately reflects LOC; the working branch displays current status and confidence. | Directory hierarchy, path filtering, complete failure reasons, and comment evidence remain proposals. |
 
-## 为什么保留地图、表格和详情
+## Why retain the map, table, and details
 
-地图适合观察空间分布，表格适合精确排序，详情承载原始依据。CodeCharta 展示了目录探索、路径搜索和可解释图例的交互；P4 提醒精确查询不一定因地图受益。因此建议在当前 HTML 报告基础上渐进增加目录和搜索，不因调研而重建整套三维系统。
+A map can show spatial distribution, a table supports precise sorting, and details carry the underlying evidence. CodeCharta illustrates directory exploration, path search, and interpretable legends; P4 cautions that maps do not necessarily help exact lookup. The recommendation is to add directories and search incrementally to the current HTML report, not to rebuild a complete 3D system solely on the basis of this review.
 
-显示面积必须明确是文件规模；颜色注明所选模式、分数范围和统计口径。未来加入 SATD 时，要展示原文、行号和候选状态，而非只显示数量。无历史、解析失败、零值应区分；小文件可以通过表格和搜索找到，不能因面积太小而不可访问。
+Label cell area as file size, and identify the selected mode, score range, and measurement basis for color. If SATD is added later, show the source text, line number, and candidate status rather than just a count. Distinguish absent history, parsing failure, and zero values; small files must remain reachable via the table and search.
 
-## 指标与解释边界
+## Metric and interpretation limits
 
-当前 churn 为新增＋删除行数，P3 的原始定义并不相同。收集历史起点、近期窗口和衰减半衰期是不同参数，应分别说明。工作区规模与历史快照可能不一致，也需要显式标注。
+Current churn is added plus deleted lines; the original definition in P3 differs. The history start, recent window, and decay half-life are distinct parameters and should be explained separately. Worktree size and historical snapshots can differ and should be labeled explicitly.
 
-高 churn 可能来自新功能、格式化或批量变更；高集中度不直接证明知识孤岛；长时间不改也可能表示稳定。当前分数是待验证的信号组合，应保留相反案例，不将自然语言理由当作已建立的因果关系。
+High churn can result from new features, formatting, or bulk changes. High concentration alone does not prove a knowledge silo, and a long period without changes can indicate stability. Current scores combine signals whose validity is unproven; retain counterexamples and do not treat natural-language explanations as established causal relationships.
 
-## 验证与停止规则
+## Evaluation and stopping rules
 
-分别评价数据正确性、候选识别/排序合理性和界面任务效果。用户正确找到 Top-3，只说明读对了系统排序，不证明排序是真实债务优先级。具体任务、基线和评分见 [评价方案](evaluation-plan.md)。
+Evaluate data correctness, candidate identification and ranking, and interface task performance separately. Correctly finding the top three shows that a user read the system's ranking; it does not prove that ranking reflects actual technical-debt priorities. Tasks, baselines, and scoring are described in the [evaluation plan](evaluation-plan.md).
 
-优先改善解释和可核查性；共同变更矩阵、跨版本趋势、三维展示和 NLP 训练作为扩展。P5 的管理分类中，本项目主要涉及识别、度量代理、检查排序及沟通，不承诺自动偿还所有类型的技术债。
+Prioritize explanation and auditability. Co-change matrices, cross-version trends, 3D displays, and NLP training are extensions. Under P5's management taxonomy, the project mainly supports identification, proxy measurement, inspection prioritization, and communication; it does not promise to repay all kinds of technical debt automatically.
