@@ -27,6 +27,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+web = [
+    "Flask>=3.0,<4",
+]
 dev = [
     "pytest>=7.0",
     "ruff>=0.5",

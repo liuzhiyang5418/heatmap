@@ -12,7 +12,7 @@
 
 ```
 Git 历史
-   │  单次遍历 git log（numstat + 作者 + 时间）
+   │  GitPython 遍历提交并读取每次提交的文件统计
    ▼
 原始提交记录  ──►  指标聚合（commits / churn / 贡献者 Gini / 年龄 / 大小 / LOC / 近因衰减）
    │
@@ -50,8 +50,11 @@ Git 历史
 cd heatmap
 pip install -e .
 
-# 或直接以模块运行（无需安装）
+# 安装后也可直接以模块运行
 python -m githotmap analyze --repo-path . --mode roi --output html --output-file heatmap.html
+
+# 输出机器可读结果（包含指标、分数分解和状态）
+python -m githotmap analyze --repo-path . --mode roi --output json --output-file heatmap.json
 
 # 查看帮助
 python -m githotmap --help
@@ -59,7 +62,19 @@ python -m githotmap analyze --help
 ```
 
 生成的 `heatmap.html` 为**自包含交互式热力图**（无外部 CDN，可离线打开）：悬停查看
-文件详情与评分理由，点击表头切换排序，色块大小映射复杂度、颜色映射风险等级。
+文件详情与评分理由，点击表头切换排序；色块面积近似反映 LOC，颜色反映当前模式的分数。
+灰色表示模型中的 `missing` 状态；目前空文件和缺失文件使用同一个状态，须人工复核。
+
+### 本机 Web 入口
+
+```bash
+pip install -e '.[web]'
+githotmap serve --port 5000
+```
+
+在浏览器打开 `http://127.0.0.1:5000`，输入本机 Git 仓库路径并选择模式。此入口同步调用
+现有分析流水线并展示 HTML 报告，只绑定本机；不是托管服务，也没有后台任务、目录筛选或上传功能。
+不安装 `web` 可继续使用 CLI 和离线报告。
 
 ## 目录结构
 
@@ -104,9 +119,14 @@ ruff check src tests   # 静态检查
 mypy src               # 类型检查
 ```
 
+如需运行浏览器交互测试，设置 `HEATMAP_CHROME` 为本机 Chrome/Chromium 可执行文件路径后再运行
+`pytest tests/test_html_browser.py`。该测试需要允许启动独立的无头浏览器。
+
+Sprint 1 的用户故事、架构候选、验收状态和待团队确认事项见 [Sprint 1 记录](docs/sprint-1.md)。
+
 
 ## 研究依据与评价
 
 阶段一资料见 [研究文档入口](docs/research/README.md)：包含六篇论文对照、设计依据、开源工具观察和待执行的评价方案。
 
-当前分数是辅助检查与排序的启发式信号，不等于已确认技术债、缺陷概率、修复工时或真实投资回报。`complexity` 评分模式也不等于 AST 圈复杂度；SATD 注释证据尚未接入主流水线。论文中的实验效果不代表本项目已经取得同样效果。
+当前分数是辅助检查与排序的启发式信号，不等于已确认技术债、缺陷概率、修复工时或真实投资回报。`complexity` 是融合多项信号的评分模式，不等于 AST 圈复杂度。主流水线接入了 TODO 候选数量，但尚未在报告中展示注释原文及位置；扫描或检测失败时仍可能静默回退。论文中的实验效果不代表本项目已经取得同样效果。
