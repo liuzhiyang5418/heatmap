@@ -57,5 +57,5 @@ assert.equal(rows().find(row => row.style.background).dataset.path, 'a.py');
 const missing = cells().find(cell => cell.dataset.path.includes('data-xss'));
 assert.equal(missing.style.background, '#777f8b');
 missing.listeners.mouseenter();
-assert.ok(elements.tooltip.textContent.includes('空文件或数据缺失'));
+assert.ok(elements.tooltip.textContent.includes('Empty file or missing data'));
 assert.ok(elements.tooltip.textContent.includes('<img data-xss'));

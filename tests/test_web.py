@@ -36,9 +36,11 @@ def test_invalid_path_and_mode_are_explained(client, tmp_path: Path) -> None:
     csrf = token(client)
     invalid = client.post("/analyze", data={"csrf_token": csrf, "repo_path": "<missing>", "mode": "hot"})
     assert invalid.status_code == 400
+    assert b"Enter an existing local directory." in invalid.data
     assert b"&lt;missing&gt;" in invalid.data
     invalid_mode = client.post("/analyze", data={"csrf_token": csrf, "repo_path": str(tmp_path), "mode": "other"})
     assert invalid_mode.status_code == 400
+    assert b"Select a valid scoring mode." in invalid_mode.data
 
 
 def test_successful_request_uses_existing_pipeline_and_renderer(client, tmp_path: Path, monkeypatch) -> None:

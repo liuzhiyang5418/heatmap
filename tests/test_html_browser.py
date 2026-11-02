@@ -65,7 +65,7 @@ try {
   require(missing.style.background === 'rgb(119, 127, 139)', 'missing colour');
   missing.dispatchEvent(new Event('mouseenter'));
   require(!document.querySelector('img[data-xss]'), 'file path treated as HTML');
-  require(document.querySelector('#tooltip').textContent.includes('空文件或数据缺失'), 'status tooltip');
+  require(document.querySelector('#tooltip').textContent.includes('Empty file or missing data'), 'status tooltip');
   document.body.dataset.uiTest = 'passed';
 } catch (error) { document.body.dataset.uiTest = 'failed: ' + error.message; }
 </script>"""

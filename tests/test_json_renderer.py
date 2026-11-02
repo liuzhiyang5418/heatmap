@@ -9,7 +9,7 @@ from githotmap.renderers import registry
 def test_json_renderer_serializes_result_without_losing_fields() -> None:
     result = AnalysisResult(
         repo_path=".", repo_urn="local:test", mode="hot",
-        files=[FileResult(metrics=FileMetrics(path="目录/a.py", commits=2),
+        files=[FileResult(metrics=FileMetrics(path="\u76ee\u5f55/a.py", commits=2),
                           mode_score=42, status="low_confidence", confidence=0.5)],
     )
     assert "json" in registry.available()
