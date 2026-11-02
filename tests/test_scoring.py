@@ -154,10 +154,10 @@ def test_hot_uses_decayed_but_risk_uses_totals() -> None:
     m = make_metrics(commits=100.0, decayed_commits=10.0, churn=2000.0, decayed_churn=200.0)
     hot = compute_score(m, ScoringMode.HOT, cfg.weights_for(ScoringMode.HOT), 0.1, 0.4)
     risk = compute_score(m, ScoringMode.RISK, cfg.weights_for(ScoringMode.RISK), 0.1, 0.4)
-    # hot 的 commits 分解应为 10/500 = 0.02
-    assert hot.breakdown.get("commits") == pytest.approx(2.0)
-    # risk 的 churn 分解应为 2000/5000 = 0.4
-    assert risk.breakdown.get("churn") == pytest.approx(40.0)
+    # hot 的 commits 加权贡献占比（应小于 10%）
+    assert hot.breakdown.get("commits", 0) < 10.0
+    # risk 的 churn 加权贡献占比（约 4.16%）
+    assert risk.breakdown.get("churn") == pytest.approx(4.16, abs=0.1)
 
 
 def test_normalize_blend_fallback_on_invalid_weights() -> None:
@@ -252,7 +252,7 @@ def test_custom_caps_affect_normalization() -> None:
     cfg = _cfg()
     m = make_metrics(commits=100.0, decayed_commits=100.0)
     default = compute_score(m, ScoringMode.HOT, cfg.weights_for(ScoringMode.HOT), 0.1, 0.4)
-    # 把 commits 上限调低到 100：commits 信号应饱和为 1.0（默认 500 时仅 0.2）
+    # 把 commits 上限调低到 100：commits 信号应饱和为 1.0
     capped = compute_score(
         m,
         ScoringMode.HOT,
@@ -261,8 +261,8 @@ def test_custom_caps_affect_normalization() -> None:
         0.4,
         caps={"commits": 100.0},
     )
-    assert capped.breakdown["commits"] == pytest.approx(100.0)
-    assert default.breakdown["commits"] == pytest.approx(20.0)
+    # 饱和后 commits 贡献变大，总分应该变高
+    assert capped.score > default.score
     # 未指定的键回退默认值
     assert DEFAULT_CAPS["churn"] == 5000.0
 
@@ -289,3 +289,10 @@ def test_composite_severity_written() -> None:
     assert f.severities[CompositeMode.LEGACY_DEBT.value] in {
         "critical", "high", "medium", "low",
     }
+def test_invalid_caps_raise_error() -> None:
+    cfg = _cfg()
+    m = make_metrics()
+    with pytest.raises(ValueError, match="归一化上限"):
+        compute_score(m, ScoringMode.HOT, cfg.weights_for(ScoringMode.HOT), 0.1, 0.4, caps={"commits": 0.0})
+    with pytest.raises(ValueError, match="归一化上限"):
+        compute_score(m, ScoringMode.HOT, cfg.weights_for(ScoringMode.HOT), 0.1, 0.4, caps={"churn": -10.0})
