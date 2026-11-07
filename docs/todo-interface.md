@@ -6,7 +6,7 @@
 | 负责人 | Member 3 |
 | 对应课程分工 | 需求分析中的「正则解析、技术债信息提取」 |
 | 代码位置 | `src/githotmap/todo/` |
-| 文档状态 | v0.1（Sprint 1 初稿，待 M4/M5/M6 会签） |
+| 文档状态 | v0.3.1（Sprint 2，含缺陷修复与容错契约更新） |
 | 适用版本 | githotmap 0.1.0 |
 
 ---
@@ -78,7 +78,9 @@
 ### 4.3 编码与容错
 
 - 读取源码使用 `encoding="utf-8", errors="replace"`，解码失败不抛异常；
-- 单文件词法/语法错误**绝不影响整体检测**，只跳过该文件无法可靠识别的部分；
+- 单文件读取失败（`OSError`：不存在/无权限/是目录）**跳过该文件而非中断整次检测**；
+- 带有 `symlink` / `too-large` / `not-text` 限制标记的条目直接跳过（扫描器有意不提供其内容）；
+- 单文件词法/语法错误**绝不影响整体检测**，降级路径同样隔离字符串字面量中的假标记；
 - 判定为注释行使用 `tokenize` 的 `COMMENT` token；docstring 行使用 `ast`。
 
 ### 4.4 类型与序列化
@@ -110,6 +112,9 @@
 | `column` | `int` | 标记在行内的起始列（1 起） |
 | `text` | `str` | 该行完整文本（上下文） |
 | `description` | `str` | 标记之后的任务描述（技术债信息提取） |
+| `owner` | `str` | 责任人，从 `TODO(alice):` / `TODO @alice` 解析，无则 `""` |
+| `ref` | `str` | 关联引用，从 `TODO #123:` / `TODO(HEATMAP-45):` 解析，无则 `""` |
+| `severity` | `int` | 紧急程度：1 常规 / 2 重要 / 3 紧急（由 `urgent`/`critical` 等关键词判定），供 M5 加权 |
 
 ### 5.3 `TodoScan` —— 顶层结果
 
@@ -117,6 +122,16 @@
 |------|------|------|
 | `path_base` | `str` | 实际使用的路径基准目录（与 M2 一致） |
 | `todos` | `list[TodoItem]` | 全部技术债条目，按 `(path, lineno, column)` 升序 |
+
+**便捷属性与聚合方法（面向 M5/M6 开箱即用）：**
+
+| 方法 / 属性 | 返回类型 | 说明 |
+|-------------|----------|------|
+| `total_count` | `int` | 技术债标记总数（属性） |
+| `paths()` | `list[str]` | 包含技术债的文件路径去重列表（升序） |
+| `by_path()` | `dict[str, list[TodoItem]]` | 按文件路径建索引字典，供 M4/M5 做字典 join |
+| `count_by_kind()` | `dict[str, int]` | 统计各标记数量（含全部枚举键），供 M6 直接画饼图 |
+| `count_by_path()` | `dict[str, int]` | 按文件统计技术债数量，供 M5 快速获取文件级信号 |
 
 ---
 
@@ -162,6 +177,8 @@ def iter_todos(path: str, source: str) -> Iterator[TodoItem]:
 | `todos` 总数 | `TodoScan` | 显式技术债计数 |
 | 各类 `kind` 计数 | 同上 | 技术债构成（TODO/FIXME/HACK/XXX） |
 | `description` 非空比例 | 同上 | 信息完整度 |
+| `owner` / `ref` 非空比例 | `TodoItem` | 责任归属与工单关联度（治理成熟度） |
+| `severity` 分布 | `TodoItem` | 紧急技术债占比，可直接作为加权因子 |
 
 > **权重与归一化归 M5**。本模块只给原始事实，不做任何 0–1 归一化。
 
@@ -207,3 +224,6 @@ return jsonify(TodoDetector().detect(scan).to_dict())   # 已是 JSON 原生类�
 | 版本 | 日期 | 变更 | 作者 |
 |------|------|------|------|
 | v0.1 | Sprint 1 | 初稿：定义路径规范、3 个数据结构、公共 API、下游接入约定 | Member 3 |
+| v0.2 | Sprint 1 | 修复行内字符串假阳性（tokenize Token 级物理隔离）；TodoScan 增加面向 M5/M6 的聚合统计接口（total_count, paths, by_path, count_by_kind, count_by_path） | Member 3 |
+| v0.3 | Sprint 2 | 深化信息提取：TodoItem 新增 owner / ref / severity 字段与解析规则 | Member 3 |
+| v0.3.1 | Sprint 2 | 缺陷修复（缺陷总结审查）：M3-2 单文件读取失败跳过不中断；M3-3/M3-6 跳过 symlink/too-large/not-text 条目；M3-4 降级路径隔离字符串假标记；M3-5 description 剥离尾部引号（随 v0.3 一并修复并补测试） | Member 3 |

@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from githotmap.scanner import FileStructure, RepositoryScan
 from githotmap.todo.detector import TodoDetector
 
@@ -73,3 +71,78 @@ def test_to_dict_json_native(tmp_path):
     json.dumps(payload)
     assert isinstance(payload["todos"], list)
     assert len(result.todos) == 1
+    assert payload["total_count"] == 1
+    assert payload["counts_by_kind"]["TODO"] == 1
+
+
+def test_scan_convenience_methods(tmp_path):
+    """测试面向 M5/M6 的便捷聚合统计接口。"""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("# TODO: one\n# FIXME: two\n", encoding="utf-8")
+    (src / "b.py").write_text("# TODO: three\n", encoding="utf-8")
+
+    scan = _make_scan(str(tmp_path), ["src/a.py", "src/b.py"])
+    result = TodoDetector().detect(scan)
+
+    # 1. total_count 属性
+    assert result.total_count == 3
+
+    # 2. paths() 去重且升序
+    assert result.paths() == ["src/a.py", "src/b.py"]
+
+    # 3. by_path() 字典索引
+    by_path = result.by_path()
+    assert len(by_path["src/a.py"]) == 2
+    assert len(by_path["src/b.py"]) == 1
+    assert [t.kind.value for t in by_path["src/a.py"]] == ["TODO", "FIXME"]
+
+    # 4. count_by_kind() 分类计数
+    kinds = result.count_by_kind()
+    assert kinds["TODO"] == 2
+    assert kinds["FIXME"] == 1
+    assert kinds["HACK"] == 0
+    assert kinds["XXX"] == 0
+
+    # 5. count_by_path() 文件级计数
+    by_path_counts = result.count_by_path()
+    assert by_path_counts == {"src/a.py": 2, "src/b.py": 1}
+
+
+def test_unreadable_file_skipped_not_crash(tmp_path):
+    """缺陷 M3-2：单个文件读取失败（OSError）应跳过而非中断整次检测。"""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("# TODO: first\n", encoding="utf-8")
+
+    # missing.py 指向不存在的文件，读取时抛 FileNotFoundError。
+    scan = _make_scan(str(tmp_path), ["src/missing.py", "src/a.py"])
+    result = TodoDetector().detect(scan)
+
+    # 检测不中断，缺失文件被跳过，正常文件照常产出。
+    assert [t.path for t in result.todos] == ["src/a.py"]
+
+
+def test_files_with_limitations_skipped(tmp_path):
+    """缺陷 M3-3/M3-6：带 symlink/too-large/not-text 标记的条目应被跳过。"""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("# TODO: keep\n", encoding="utf-8")
+    # 下面三个文件故意不创建——即使创建了，带标记的条目也不应被读取。
+    (src / "b.py").write_text("# TODO: symlinked\n", encoding="utf-8")
+
+    scan = RepositoryScan(
+        root=str(tmp_path),
+        path_base=str(tmp_path),
+        files=[
+            FileStructure(path="src/a.py"),
+            FileStructure(path="src/b.py", limitations=["symlink"]),
+            FileStructure(path="src/c.py", limitations=["too-large"]),
+            FileStructure(path="src/d.py", limitations=["not-text"]),
+        ],
+    )
+    result = TodoDetector().detect(scan)
+
+    # b/c/d 全部跳过，只有无标记的 a.py 参与检测。
+    assert [t.path for t in result.todos] == ["src/a.py"]
+
