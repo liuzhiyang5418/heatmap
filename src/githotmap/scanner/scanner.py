@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from githotmap.scanner.models import (
+    LIMITATION_CODES,
     FileStructure,
     Limitation,
     RepositoryScan,
@@ -116,6 +117,12 @@ class RepositoryScanner:
         files = [self._build_file(entry) for entry in walk.entries]
         files.sort(key=lambda item: item.path)
 
+        # 按原因码聚合降级次数（NFR-2.2/2.3 的机器可读证据）。
+        by_code: dict[str, int] = {}
+        for item in files:
+            for limitation in item.limitations:
+                by_code[limitation] = by_code.get(limitation, 0) + 1
+
         stats = ScanStats(
             files_seen=walk.files_seen,
             files_matched=len(walk.entries) + walk.files_excluded,
@@ -123,6 +130,8 @@ class RepositoryScanner:
             files_emitted=len(files),
             files_parsed=sum(1 for item in files if item.parsed),
             files_with_limitations=sum(1 for item in files if item.limitations),
+            # 键集合固定为 LIMITATION_CODES，保证输出结构不随命中情况抖动。
+            degradations_by_code={code: by_code.get(code, 0) for code in LIMITATION_CODES},
             excluded_dirs=list(walk.excluded_dirs),
             total_bytes=sum(item.size_bytes for item in files),
             elapsed_ms=round((time.perf_counter() - started) * 1000.0, 3),

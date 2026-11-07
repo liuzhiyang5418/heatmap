@@ -134,6 +134,65 @@
 - `to_dict()` 的返回值只含 JSON 原生类型（`str/int/float/bool/None/list/dict`），M6 可直接 `json.dumps`；
 - 枚举字段在 `to_dict()` 中序列化为其 `str` 值。
 
+### 4.5 原因码契约（NFR-2 健壮性与可审计性）【契约 · 新增】
+
+> **扫描阶段的原因码只有一份来源：`githotmap.scanner.Limitation`，其取值集合由
+> `githotmap.scanner.LIMITATION_CODES` 导出。其它模块不得复制字面量。**
+
+#### 4.5.1 为什么钉死这一条
+
+NFR-2 的要求是「每次降级都必须带可机器读取的原因码」。若 M2 用 `"symlink"`、
+M5 在 `DegradationCode` 里另抄一份 `"symlink"`，两处就会各自漂移——这和 §4.1
+的 `core.quotepath`（M4-2）是同一类**静默失配**故障：没有异常，只是数据悄悄丢。
+
+#### 4.5.2 稳定取值（不得修改）
+
+| 取值 | 含义 | 触发条件 |
+|------|------|----------|
+| `symlink` | 符号链接，未跟随 | `follow_symlinks=False` 时只登记路径 |
+| `not-text` | 判定为二进制 | 头部 1024 字节含 `\x00` |
+| `too-large` | 超过 `max_file_bytes` | 只统计字节数，不解析 |
+| `unreadable` | 读取失败 | `OSError`（权限/占用等） |
+| `unsupported-language` | 后缀不支持 AST 解析 | 命中 `include_suffixes` 但非 `.py/.pyw/.pyi` |
+| `syntax-error` | Python 语法错误 | `ast.parse` 失败 |
+
+**修改规则**：取值是稳定契约，**改名或改值都被禁止**——它会同时破坏
+`core/diagnostics.DegradationCode`、M6 的展示映射，以及 NFR-3 冻结夹具的指纹比对。
+新增码只能**追加**，并须同步更新本表、`LIMITATION_CODES` 与本文件 §13 变更记录。
+
+#### 4.5.3 给 M5 的接入约定（WP-0 原因码对齐）
+
+一致性由 `tests/test_scanner_codes.py` 锁定，M5 侧无需再抄一遍：
+
+```python
+from githotmap.scanner import LIMITATION_CODES, Limitation
+
+class DegradationCode(str, Enum):
+    # 扫描阶段：直接引用唯一来源，不要复制字面量
+    SYMLINK = Limitation.SYMLINK.value
+    NOT_TEXT = Limitation.NOT_TEXT.value
+    TOO_LARGE = Limitation.TOO_LARGE.value
+    UNREADABLE = Limitation.UNREADABLE.value
+    UNSUPPORTED_LANGUAGE = Limitation.UNSUPPORTED_LANGUAGE.value
+    SYNTAX_ERROR = Limitation.SYNTAX_ERROR.value
+    # 其它阶段：由 M5 追加（如 git-quotepath / stage-failed / shallow-clone）
+```
+
+- **依赖方向**：`core/` 已经依赖 `scanner/`（`pipeline.py` 即如此），`scanner/`
+  不反向依赖任何上层模块，因此该 import 不会引入循环；
+- M5 的 `AnalysisStats.degradations_by_code` 可直接取 `scan.stats.degradations_by_code`
+  作为扫描阶段的贡献，无需重新遍历文件；
+- 若 M5 需要**扩展**原因码（git/todo 阶段），请追加到 `DegradationCode` 而非
+  `Limitation`——`Limitation` 的语义严格限定在「扫描阶段」。
+
+#### 4.5.4 可审计性字段
+
+`ScanStats.degradations_by_code` 按码聚合降级次数，**键集合与顺序固定为
+`LIMITATION_CODES`**（未命中记 `0`）。固定键集合有两个目的：
+
+1. 让输出结构不随「本次恰好命中哪些码」而抖动，便于 M6 直接渲染覆盖率面板；
+2. 让 NFR-3 的结果指纹不会因偶发码的有无而漂移。
+
 ---
 
 ## 5. 数据结构
@@ -229,6 +288,7 @@
 | `files_emitted` | `int` | 进入 `files` 列表的数量（**= files_matched − files_excluded**） |
 | `files_parsed` | `int` | AST 解析成功的数量 |
 | `files_with_limitations` | `int` | 存在 `limitations` 的数量 |
+| `degradations_by_code` | `dict[str, int]` | 按原因码聚合的降级次数。**键集合与顺序固定为 `LIMITATION_CODES`**（未命中为 `0`），见 §4.5.4；用于 NFR-2.3 的覆盖率展示与 NFR-3 的结构稳定 |
 | `excluded_dirs` | `list[str]` | 被剪枝的目录，**仓库根相对路径**且以 `/` 结尾（如 `pkg/__pycache__/`），已排序 |
 | `total_bytes` | `int` | 全部 `files` 的字节数之和 |
 | `elapsed_ms` | `float` | 扫描耗时（毫秒，**非确定字段**） |
@@ -297,6 +357,7 @@ from githotmap.scanner import (
     SymbolInfo,             # 符号
     LineCounts,             # 行数构成
     ScanStats,              # 统计
+    LIMITATION_CODES,       # 原因码唯一来源（NFR-2，见 §4.5）
     SymbolKind,             # 符号类型枚举
     Limitation,             # 限制原因码枚举
     ScanError,              # 扫描错误（仅根目录非法时抛）
@@ -499,6 +560,7 @@ CS5351 要求每项非功能需求都要有架构设计方案与理由。扫描�
 | 单元 + 集成测试 | ✅ 76 passed / 3 skipped（skip 为 Windows 下无权限创建符号链接的用例） |
 | `ruff check`（scanner 目录） | ✅ 通过 |
 | `mypy --strict`（scanner 目录） | ✅ 通过 |
+| **原因码契约**（NFR-2 · §4.5，Sprint 2） | ✅ `LIMITATION_CODES` 唯一来源 + `ScanStats.degradations_by_code`（键集固定）+ `tests/test_scanner_codes.py` 锁定取值/结构/覆盖 |
 
 ### 12.2 脚手架既有问题（**不是**本次引入，建议排期清理）
 
@@ -528,3 +590,4 @@ CS5351 要求每项非功能需求都要有架构设计方案与理由。扫描�
 | v0.1.2 | Sprint 1 | 依 PR #2 更新：M4 的 GitPython 依赖声明冲突已解决（§7.2、§11）；§12.2 补注测量基准 | Member 2 |
 | v0.1.3 | Sprint 1 | **勘误**：§7.1 示例的拼接基准由 `scan.root` 改为 `scan.path_base`（扫描仓库子目录时前者会得到不存在的路径）；补充单文件读取降级与 PEP 263 编码两条接入要求 | Member 2 |
 | v0.1.4 | Sprint 1 | §4.1 新增**非 ASCII 路径陷阱**：git `core.quotepath` 默认转义路径，会使 M4 与 M2 的键交集为空、历史指标静默丢失；M4 侧须关闭 quotepath | Member 2 |
+| v0.2 | Sprint 2 | **NFR-2 原因码对齐**：新增 §4.5 原因码契约，`LIMITATION_CODES` 成为跨模块唯一来源；`ScanStats` 新增 `degradations_by_code`（键集固定为 `LIMITATION_CODES`，未命中记 0）；补 M5 的 `DegradationCode` 接入约定；新增 `tests/test_scanner_codes.py`（12 用例）锁定取值、结构与覆盖 | Member 2 |

@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from githotmap.scanner.models import (
+    LIMITATION_CODES,
     FileStructure,
     Limitation,
     LineCounts,
@@ -57,6 +58,7 @@ from githotmap.scanner.walker import (
 
 __all__ = [
     "DEFAULT_EXCLUDES",
+    "LIMITATION_CODES",
     "FileStructure",
     "Limitation",
     "LineCounts",
