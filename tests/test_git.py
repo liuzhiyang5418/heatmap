@@ -146,7 +146,12 @@ def test_git_history_skips_merge_commits(tmp_path: Path) -> None:
     repo.git.checkout("master")
     commit_file("c.py", "l1\n", "c3 on master")
 
-    # feature 与 master 已分叉，merge 会生成一个双父 merge commit
+    # feature 与 master 已分叉，merge 会生成一个双父 merge commit。
+    # `git merge` 不接受 author/committer 参数，只能查仓库配置，
+    # 因此在临时仓库内写局部身份，避免测试依赖运行机器的全局 git 配置。
+    with repo.config_writer() as cw:
+        cw.set_value("user", "name", "alice")
+        cw.set_value("user", "email", "alice@example.com")
     repo.git.merge("feature")
     merge_commit = repo.head.commit
     assert len(merge_commit.parents) == 2
