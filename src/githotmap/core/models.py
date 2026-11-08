@@ -1,6 +1,6 @@
 """领域模型：评分模式、指标与结果数据类。
 
-本模块是包内其它模块共享的"契约层"，只依赖标准库，不引入任何上层依赖，
+本模块是包内其它模块共享的"契约层"，只依赖标准库与诊断契约，不引入任何上层依赖，
 从而保证 ``core`` 与 ``renderers`` 之间单向、无环的引用关系。
 """
 
@@ -9,7 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
+
+from githotmap.core.diagnostics import AnalysisStats
 
 
 class ScoringMode(str, Enum):
@@ -120,6 +122,8 @@ class FileResult:
     status: str = "ok"
     # 评分置信度 [0,1]：1.0 为完全可信，低样本或缺失数据时降低。
     confidence: float = 1.0
+    # 文件级限制/降级原因码；与评分状态并存，供流水线与展示层审计。
+    limitations: list[str] = field(default_factory=list)
 
     # ---- 便捷透传属性，避免调用方反复访问 metrics ----
     @property
@@ -168,6 +172,7 @@ class FileResult:
             "mode_score": self.mode_score,
             "status": self.status,
             "confidence": self.confidence,
+            "limitations": list(self.limitations),
         }
 
 
@@ -200,16 +205,20 @@ class AnalysisResult:
     mode: str
     files: list[FileResult] = field(default_factory=list)
     folders: list[FolderResult] = field(default_factory=list)
+    stats: AnalysisStats = field(default_factory=AnalysisStats)
+    schema_version: str = "1.0"
     analyzed_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
             "repo_path": self.repo_path,
             "repo_urn": self.repo_urn,
             "mode": self.mode,
             "analyzed_at": self.analyzed_at,
             "files": [f.to_dict() for f in self.files],
             "folders": [f.to_dict() for f in self.folders],
+            "stats": self.stats.to_dict(),
         }
