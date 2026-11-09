@@ -11,6 +11,7 @@ from githotmap import __version__
 from githotmap.config.config import ScoringConfig
 from githotmap.core.models import ScoringMode
 from githotmap.core.pipeline import AnalysisPipeline
+from githotmap.core.diagnostics import AnalysisDegradedError
 from githotmap.renderers import registry
 
 _ALL_MODES = ["hot", "risk", "complexity", "roi", "active_owners", "refactor_now", "legacy_debt"]
@@ -51,6 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="排除路径模式，可重复（如 '**/node_modules/'）",
     )
+    analyze.add_argument(
+        "--strict", action="store_true", help="有降级发生时以退出码 3 终止"
+    )
 
     serve = sub.add_parser("serve", help="Start a local web dashboard (requires the web extra)")
     serve.add_argument("--port", type=int, default=5000, help="Local port (default: 5000)")
@@ -79,11 +83,16 @@ def _run_analyze(args: argparse.Namespace) -> int:
         if args.mode in _ALL_MODES[:4]:
             config.mode = ScoringMode(args.mode)
         config.exclude = list(args.exclude)
+        if args.strict:
+            config.degrade_policy = "strict"
     except (KeyError, ValueError) as exc:
         print(f"配置错误: {exc}", file=sys.stderr)
         return 2
 
+    # 这行必须在
     pipeline = AnalysisPipeline(config)
+
+    # ⬇️ 这一行必须要有，而且和 except 对齐！
     try:
         result = pipeline.run(
             repo_path=args.repo_path,
@@ -91,6 +100,11 @@ def _run_analyze(args: argparse.Namespace) -> int:
             since=args.since,
             limit=args.limit,
         )
+    except AnalysisDegradedError as exc:
+        print("分析被严格模式中断，检测到以下降级：", file=sys.stderr)
+        for d in exc.stats.degradations:
+            print(f"  - [{d.stage}] {d.code.value}: {d.summary} (path={d.path})", file=sys.stderr)
+        return 3
     except Exception as exc:  # noqa: BLE001 —— CLI 顶层兜底，给出可读错误
         print(f"分析失败: {exc}", file=sys.stderr)
         return 1
