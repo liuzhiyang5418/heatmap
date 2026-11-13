@@ -77,6 +77,37 @@ class TodoItem:
 
 
 @dataclass(slots=True)
+class TodoDegradation:
+    """单条降级记录（NFR-2：不静默降级，每次跳过都带可机器读取的原因码）。
+
+    字段形状与 NFR 计划 WP-0 的 ``core.diagnostics.Degradation`` 对齐，
+    便于 M5 的流水线落地后以一次映射接入（见 ``docs/todo-interface.md`` §4.5）：
+
+    - ``stage``  ：固定 ``"todo"``，标明降级发生在哪一阶段；
+    - ``code``   ：原因码，取值遵循 ``scanner.Limitation``（symlink / too-large /
+      not-text）并扩展 ``"unreadable"``（读取失败），与 WP-0 的
+      ``DegradationCode`` 取值一致；
+    - ``path``   ：§4.1 规范的文件路径（确定性排序的依据之一）；
+    - ``summary``：一行人类可读说明；**只含固定文本与异常类名**（不含异常消息），
+      保证跨平台、跨运行的可复现性（NFR-3）。
+    """
+
+    code: str
+    path: str
+    summary: str
+    stage: str = "todo"
+
+    def to_dict(self) -> dict[str, Any]:
+        """转成只含 JSON 原生类型的字典，供 M6 ``json.dumps``。"""
+        return {
+            "stage": self.stage,
+            "code": self.code,
+            "path": self.path,
+            "summary": self.summary,
+        }
+
+
+@dataclass(slots=True)
 class TodoScan:
     """一次检测的顶层产出（对应 M2 的 ``RepositoryScan``）。"""
 
@@ -84,6 +115,9 @@ class TodoScan:
     path_base: str = ""
     #: 全部技术债条目，已按 ``(path, lineno, column)`` 升序排序（确定性要求）。
     todos: list[TodoItem] = field(default_factory=list)
+    #: 本次检测中的全部降级记录（跳过/读取失败），按 ``(path, code)`` 升序。
+    #: NFR-2.2：每条都必带非空 ``code``，无静默降级。
+    degradations: list[TodoDegradation] = field(default_factory=list)
 
     @property
     def total_count(self) -> int:
@@ -134,5 +168,6 @@ class TodoScan:
             "path_base": self.path_base,
             "total_count": self.total_count,
             "counts_by_kind": self.count_by_kind(),
+            "degradations": [d.to_dict() for d in self.degradations],
             "todos": [t.to_dict() for t in self.todos],
         }
