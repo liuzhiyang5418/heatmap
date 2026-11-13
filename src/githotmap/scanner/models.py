@@ -32,7 +32,22 @@ class SymbolKind(str, Enum):
 
 
 class Limitation(str, Enum):
-    """文件结构未能完整解析的原因码（用于审计扫描覆盖率）。"""
+    """文件结构未能完整解析的原因码（用于审计扫描覆盖率）。
+
+    【NFR-2 契约 · 跨模块原因码的唯一来源】
+    本枚举是**所有阶段原因码的唯一权威来源**，不是本模块的私有实现细节：
+
+    - 取值是机器可读的稳定契约，**不得修改或删除**——改值会同时破坏
+      ``core/diagnostics.py`` 的 ``DegradationCode``、M6 的展示映射，
+      以及 NFR-3 冻结夹具的历史指纹比对；
+    - 新增码只能**追加**，并且必须同步更新 :data:`LIMITATION_CODES`
+      与 ``docs/scanner-interface.md`` §4.5 的变更记录；
+    - 其它模块（尤其是 ``core/diagnostics.py``）必须通过
+      :data:`LIMITATION_CODES` 引用这些取值，**不得复制字面量**，
+      否则两处会各自漂移、重新出现「静默失配」。
+
+    扫描器只负责**产出**原因码，不负责决定降级策略（那属于 M5 的 WP-1/WP-2）。
+    """
 
     SYMLINK = "symlink"
     NOT_TEXT = "not-text"
@@ -40,6 +55,17 @@ class Limitation(str, Enum):
     UNREADABLE = "unreadable"
     UNSUPPORTED_LANGUAGE = "unsupported-language"
     SYNTAX_ERROR = "syntax-error"
+
+
+#: 全部扫描原因码的取值，按 :class:`Limitation` 的定义顺序排列（稳定顺序）。
+#:
+#: 【NFR-2 契约】这是「扫描阶段原因码」的唯一来源。其它模块应当::
+#:
+#:     from githotmap.scanner import LIMITATION_CODES
+#:
+#: 而不是自行复制 ``"symlink"``/``"not-text"`` 等字面量。顺序稳定使
+#: ``ScanStats.to_dict()`` 的键序可复现（NFR-3）。
+LIMITATION_CODES: tuple[str, ...] = tuple(code.value for code in Limitation)
 
 
 @dataclass(slots=True)
@@ -192,9 +218,18 @@ class ScanStats:
     files_emitted: int = 0
     files_parsed: int = 0
     files_with_limitations: int = 0
+    #: 各原因码的命中次数。键集合固定为 :data:`LIMITATION_CODES`（未命中记 0），
+    #: 使输出结构与「本次扫描恰好命中哪些码」无关——既便于 M5 汇总进
+    #: ``AnalysisStats``，也让 NFR-3 的结果指纹不会因偶发码的有无而抖动。
+    degradations_by_code: dict[str, int] = field(default_factory=dict)
     excluded_dirs: list[str] = field(default_factory=list)
     total_bytes: int = 0
     elapsed_ms: float = 0.0
+
+    def __post_init__(self) -> None:
+        """把未出现的原因码补 0，保证键集合稳定（NFR-2 可审计 / NFR-3 确定性）。"""
+        for code in LIMITATION_CODES:
+            self.degradations_by_code.setdefault(code, 0)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -204,6 +239,10 @@ class ScanStats:
             "files_emitted": self.files_emitted,
             "files_parsed": self.files_parsed,
             "files_with_limitations": self.files_with_limitations,
+            # 按 LIMITATION_CODES 的固定顺序输出，不受 dict 插入顺序影响。
+            "degradations_by_code": {
+                code: self.degradations_by_code.get(code, 0) for code in LIMITATION_CODES
+            },
             "excluded_dirs": list(self.excluded_dirs),
             "total_bytes": self.total_bytes,
             "elapsed_ms": self.elapsed_ms,

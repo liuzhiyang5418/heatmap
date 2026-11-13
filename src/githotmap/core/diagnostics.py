@@ -1,7 +1,10 @@
 """可审计诊断模型：统一记录分析阶段的降级原因与覆盖统计。
 
-本模块是核心契约层，只依赖标准库；尤其不得导入 ``githotmap.config``，
-避免重新引入 config 与 core 之间的循环依赖。
+依赖方向是**单向**的，改动前请先确认没有破坏它：
+
+- 只依赖标准库 + ``githotmap.scanner``（复用原因码的唯一来源，见 NFR-2 契约）；
+- 尤其**不得**导入 ``githotmap.config``，避免重新引入 config 与 core 之间的循环依赖；
+- 反过来 ``scanner`` 也不得导入本模块，否则成环。依赖方向固定为 ``core → scanner``。
 """
 
 from __future__ import annotations
@@ -10,16 +13,25 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from githotmap.scanner import Limitation
+
 
 class DegradationCode(str, Enum):
-    """所有分析阶段共享的机器可读降级原因码。"""
+    """所有分析阶段共享的机器可读降级原因码。
 
-    SYMLINK = "symlink"
-    NOT_TEXT = "not-text"
-    TOO_LARGE = "too-large"
-    UNREADABLE = "unreadable"
-    UNSUPPORTED_LANGUAGE = "unsupported-language"
-    SYNTAX_ERROR = "syntax-error"
+    前 6 个取值**直接引用** :class:`githotmap.scanner.Limitation`（NFR-2 的唯一来源），
+    不复制字面量：任何一方的改动都会立即反映到另一方，从根上消除「两处各自漂移」
+    （这正是 M4-2 的 ``core.quotepath`` 那类静默失配）。其余为其它阶段的扩展码。
+    """
+
+    # 扫描阶段：唯一来源是 scanner.Limitation（见 docs/scanner-interface.md §4.5）
+    SYMLINK = Limitation.SYMLINK.value
+    NOT_TEXT = Limitation.NOT_TEXT.value
+    TOO_LARGE = Limitation.TOO_LARGE.value
+    UNREADABLE = Limitation.UNREADABLE.value
+    UNSUPPORTED_LANGUAGE = Limitation.UNSUPPORTED_LANGUAGE.value
+    SYNTAX_ERROR = Limitation.SYNTAX_ERROR.value
+    # 其它阶段：由 core 侧扩展，不进入 scanner 的语义范围
     GIT_QUOTEPATH = "git-quotepath"
     STAGE_FAILED = "stage-failed"
     REPO_NOT_GIT = "repo-not-git"
