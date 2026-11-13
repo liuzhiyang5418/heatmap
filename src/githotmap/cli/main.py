@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from githotmap import __version__
 from githotmap.config.config import ScoringConfig
+from githotmap.core.diagnostics import AnalysisDegradedError
 from githotmap.core.models import ScoringMode
 from githotmap.core.pipeline import AnalysisPipeline
-from githotmap.core.diagnostics import AnalysisDegradedError
 from githotmap.renderers import registry
 
 _ALL_MODES = ["hot", "risk", "complexity", "roi", "active_owners", "refactor_now", "legacy_debt"]
@@ -89,10 +89,8 @@ def _run_analyze(args: argparse.Namespace) -> int:
         print(f"配置错误: {exc}", file=sys.stderr)
         return 2
 
-    # 这行必须在
     pipeline = AnalysisPipeline(config)
 
-    # ⬇️ 这一行必须要有，而且和 except 对齐！
     try:
         result = pipeline.run(
             repo_path=args.repo_path,
@@ -104,6 +102,8 @@ def _run_analyze(args: argparse.Namespace) -> int:
         print("分析被严格模式中断，检测到以下降级：", file=sys.stderr)
         for d in exc.stats.degradations:
             print(f"  - [{d.stage}] {d.code.value}: {d.summary} (path={d.path})", file=sys.stderr)
+        for code, count in sorted(exc.stats.degradations_by_code.items()):
+            print(f"  - {code}: {count} 处", file=sys.stderr)
         return 3
     except Exception as exc:  # noqa: BLE001 —— CLI 顶层兜底，给出可读错误
         print(f"分析失败: {exc}", file=sys.stderr)

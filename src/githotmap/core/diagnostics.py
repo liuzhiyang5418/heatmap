@@ -71,13 +71,16 @@ class AnalysisStats:
             "degradations_by_code": dict(self.degradations_by_code),
             "degradations": [item.to_dict() for item in self.degradations],
         }
+
+
 class AnalysisDegradedError(Exception):
     """当开启严格模式且发生降级时抛出，携带完整的降级信息。"""
+
     def __init__(self, stats: AnalysisStats):
         self.stats = stats
         codes = ", ".join(stats.degradations_by_code.keys())
         super().__init__(f"Analysis degraded in strict mode. Reasons: {codes}")
 
-# 原来的 __all__ 改成：
-__all__ = ["AnalysisStats", "Degradation", "DegradationCode", "AnalysisDegradedError"]
+
+__all__ = ["AnalysisDegradedError", "AnalysisStats", "Degradation", "DegradationCode"]
 
