@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import fnmatch
 import time
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Iterable
 
 from githotmap.config.config import COMPOSITE_WEIGHTS, ScoringConfig
-from githotmap.core.diagnostics import AnalysisStats, Degradation, DegradationCode, AnalysisDegradedError
-from githotmap.core.git import GitHistory, resolve_urn
+from githotmap.core.diagnostics import (
+    AnalysisDegradedError,
+    AnalysisStats,
+    Degradation,
+    DegradationCode,
+)
+from githotmap.core.git import CommitRecord, GitHistory, resolve_urn
 from githotmap.core.metrics import aggregate_file_metrics, enrich_worktree_attributes
 from githotmap.core.models import (
     AnalysisResult,
     CompositeMode,
+    FileMetrics,
     FileResult,
     ScoringMode,
 )
@@ -26,19 +32,21 @@ from githotmap.todo import TodoDetector
 
 
 @contextmanager
-def _guard(stage: str, stats: AnalysisStats):
+def _guard(stage: str, stats: AnalysisStats) -> Iterator[None]:
     """捕获阶段异常并记录统计信息，防止静默失败。"""
     start = time.perf_counter()
     try:
         yield
-    except Exception as e:
-        stats.degradations.append(Degradation(
-            stage=stage,
-            code=DegradationCode.STAGE_FAILED,
-            path=None,
-            summary=f"{stage} stage failed",
-            detail=str(e)
-        ))
+    except Exception as exc:  # noqa: BLE001 —— 阶段降级必须隔离所有实现异常
+        stats.degradations.append(
+            Degradation(
+                stage=stage,
+                code=DegradationCode.STAGE_FAILED,
+                path=None,
+                summary=f"{stage} stage failed",
+                detail=str(exc),
+            )
+        )
     finally:
         stats.stage_elapsed_ms[stage] = (time.perf_counter() - start) * 1000.0
 
@@ -94,6 +102,10 @@ class AnalysisPipeline:
         base_mode, composite = _resolve_mode(mode if mode is not None else self.config.mode)
         cfg = self.config
         stats = AnalysisStats()
+        records: list[CommitRecord] = []
+        metrics_map: dict[str, FileMetrics] = {}
+        files: list[FileResult] = []
+        seed_mode = base_mode if base_mode is not None else ScoringMode.HOT
 
         # 1. 采集
         with _guard("git", stats):
@@ -158,9 +170,8 @@ class AnalysisPipeline:
 
         # 4. 评分
         with _guard("scoring", stats):
-            seed_mode = base_mode if base_mode is not None else ScoringMode.HOT
             scoring_cfg = replace(cfg, normalization_caps=caps_override)
-            files: list[FileResult] = [score_file(m, seed_mode, scoring_cfg) for m in metrics_map.values()]
+            files = [score_file(m, seed_mode, scoring_cfg) for m in metrics_map.values()]
 
             # 把 scanner 里的限制信息合并到结果里
             if scan is not None:
@@ -182,13 +193,19 @@ class AnalysisPipeline:
         folders = aggregate_folders(ranked_files)
         ranked_folders = rank_folders(folders, limit=limit if limit is not None else cfg.limit)
 
-        # 7. 统计降级分布
+        # 7. 在截断前统计阶段事件与文件级降级，保证审计覆盖完整分析结果。
         for d in stats.degradations:
-            stats.degradations_by_code[d.code.value] = stats.degradations_by_code.get(d.code.value, 0) + 1
-        stats.files_degraded = sum(1 for f in ranked_files if f.limitations) + len(stats.degradations)
+            code = d.code.value
+            stats.degradations_by_code[code] = stats.degradations_by_code.get(code, 0) + 1
+        for f in files:
+            for code in f.limitations:
+                stats.degradations_by_code[code] = stats.degradations_by_code.get(code, 0) + 1
+        stats.files_degraded = sum(1 for f in files if f.limitations)
 
-        # 8. 严格模式拦截
-        if cfg.degrade_policy == "strict" and (stats.degradations or stats.files_degraded > 0):
+        # 8. 严格模式同时拦截阶段失败和文件级降级，且不受输出 limit 影响。
+        if cfg.degrade_policy == "strict" and (
+            stats.degradations or any(f.limitations for f in files)
+        ):
             raise AnalysisDegradedError(stats)
 
         return AnalysisResult(

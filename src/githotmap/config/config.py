@@ -112,7 +112,7 @@ class ScoringConfig:
     exclude: list[str] = field(default_factory=list)
     since: str | None = None
 
-    # 添加这一行，默认是宽容的 degrade，如果设为 strict 就会在降级时报错
+    # 默认宽容降级；strict 模式下任何降级都会终止分析。
     degrade_policy: str = "degrade"
 
     @classmethod
