@@ -18,9 +18,10 @@ M4 Git 历史分析、M5 评分引擎、M6 Flask 看板）之间的唯一数据�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+from githotmap.clock import SystemClock
 
 
 class SymbolKind(str, Enum):
@@ -262,7 +263,7 @@ class RepositoryScan:
     path_base: str
     files: list[FileStructure] = field(default_factory=list)
     stats: ScanStats = field(default_factory=ScanStats)
-    scanned_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    scanned_at: str = field(default_factory=lambda: SystemClock().now().isoformat())
 
     def paths(self) -> list[str]:
         """全部文件路径（已排序），供 M3 遍历。"""

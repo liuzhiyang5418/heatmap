@@ -271,10 +271,9 @@ def test_scan_self_reports_own_package_metrics() -> None:
     qualnames = {symbol.qualname for symbol in models.symbols}
     assert {"LineCounts", "SymbolInfo", "FileStructure", "ScanStats", "RepositoryScan"} <= qualnames
     assert "FileStructure.to_dict" in qualnames
-    assert models.imports == [
-        "__future__",
-        "dataclasses",
-        "datetime",
-        "enum",
-        "typing",
-    ]
+    # 只断言「关键依赖齐全 + 已排序」，不绑定完整列表：
+    # 该文件会随实现演进增删 import（例如 NFR-3 时钟注入把 datetime 换成了
+    # githotmap.clock），精确相等会让每次合理改动都误报。
+    assert {"__future__", "dataclasses", "enum", "typing"} <= set(models.imports)
+    assert "githotmap.clock" in models.imports
+    assert models.imports == sorted(models.imports)

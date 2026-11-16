@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from githotmap.clock import SystemClock
 from githotmap.core.diagnostics import AnalysisStats
 
 
@@ -207,9 +207,7 @@ class AnalysisResult:
     folders: list[FolderResult] = field(default_factory=list)
     stats: AnalysisStats = field(default_factory=AnalysisStats)
     schema_version: str = "1.0"
-    analyzed_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    analyzed_at: str = field(default_factory=lambda: SystemClock().now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return {

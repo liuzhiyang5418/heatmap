@@ -14,6 +14,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from githotmap.clock import SystemClock
 from githotmap.core.git import CommitRecord
 from githotmap.core.models import FileMetrics
 
@@ -60,12 +61,11 @@ def aggregate_file_metrics(
 ) -> dict[str, FileMetrics]:
     """按文件聚合提交记录，返回 ``{path: FileMetrics}``。
 
-    ``now`` 为参考时间戳（unix 秒），默认取当前时间；单元测试可注入固定值。
+    ``now`` 为参考时间戳（unix 秒），默认取当前时间；单元测试或冻结夹具应显式注入
+    固定值（NFR-3），否则 ``age_days`` / 近因信号会随运行日期漂移。
     """
-    import time
-
     if now is None:
-        now = time.time()
+        now = SystemClock().now().timestamp()
 
     # 中间聚合结构
     per_file: dict[str, dict] = {}
