@@ -16,13 +16,26 @@ message、tree 等 ``CommitRecord`` 不携带的字段。
 
 from __future__ import annotations
 
+import warnings
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Generic, TypeVar
 
-from githotmap.core.git import _iter_file_changes, _normalize_since, _open_repo
+import git as _git
+
+from githotmap.core.git import (
+    CODE_EMPTY_REPO,
+    CODE_SHALLOW_CLONE,
+    GitDegradation,
+    _iter_file_changes,
+    _normalize_since,
+    _open_repo,
+)
+
+_T = TypeVar("_T")
 
 # ---------------------------------------------------------------------------
 # 数据类
@@ -74,6 +87,57 @@ class CommitFrequency:
     total_commits: int
 
 
+@dataclass(slots=True)
+class GitAnalysisResult(Generic[_T]):
+    """Result of a deep-history analysis together with coverage limitations."""
+
+    result: _T
+    degradations: list[GitDegradation]
+
+
+def _record_shallow_history(repo: _git.Repo, degradations: list[GitDegradation]) -> bool:
+    """Report empty repositories and shallow boundaries before returning history data."""
+    if not repo.head.is_valid():
+        degradations.append(
+            GitDegradation(
+                code=CODE_EMPTY_REPO,
+                path=None,
+                summary="repository has no commits",
+            )
+        )
+        return False
+    shallow_file = Path(repo.common_dir) / "shallow"
+    if not shallow_file.is_file():
+        return True
+    boundaries = sorted(set(shallow_file.read_text(encoding="ascii").splitlines()))
+    degradations.extend(
+        GitDegradation(
+            code=CODE_SHALLOW_CLONE,
+            path=commit_hash,
+            summary="history before this shallow boundary is unavailable",
+        )
+        for commit_hash in boundaries
+    )
+    return True
+
+
+def _warn_if_unreported(
+    degradations: list[GitDegradation], *, caller_supplied_diagnostics: bool
+) -> None:
+    if degradations and not caller_supplied_diagnostics:
+        warnings.warn(
+            "Git history is incomplete; use the corresponding *_with_degradations API "
+            "to inspect machine-readable reasons",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+
+
+def _ordered_degradations(degradations: list[GitDegradation]) -> list[GitDegradation]:
+    unique = {(item.code, item.path, item.summary): item for item in degradations}
+    return sorted(unique.values(), key=lambda item: (item.path or "", item.code, item.summary))
+
+
 # ---------------------------------------------------------------------------
 # 1. 贡献者排名
 # ---------------------------------------------------------------------------
@@ -83,22 +147,30 @@ def top_contributors(
     repo_path: str | Path,
     top_n: int = 20,
     since: str | None = None,
+    *,
+    _degradations: list[GitDegradation] | None = None,
 ) -> list[ContributorStats]:
     """按总改动量（churn = added + deleted）降序返回贡献者排名。"""
+    diagnostics = _degradations if _degradations is not None else []
     # 贡献者 -> {commits, added, deleted}
     agg: dict[tuple[str, str], dict[str, int]] = defaultdict(
         lambda: {"commits": 0, "added": 0, "deleted": 0}
     )
 
-    kwargs: dict = {}
+    kwargs: dict[str, Any] = {}
     if since:
-        kwargs["since"] = _normalize_since(since)
+        normalized_since = _normalize_since(since)
+        if normalized_since is not None:
+            kwargs["since"] = normalized_since
 
     with _open_repo(repo_path) as repo:
+        if not _record_shallow_history(repo, diagnostics):
+            _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
+            return []
         for commit in repo.iter_commits(**kwargs):
             if len(commit.parents) > 1:
                 continue
-            key = (commit.author.name, commit.author.email)
+            key = (commit.author.name or "", commit.author.email or "")
             agg[key]["commits"] += 1
             for _, stats in _iter_file_changes(commit):
                 agg[key]["added"] += stats.get("insertions", 0)
@@ -107,8 +179,12 @@ def top_contributors(
     # 排序：先按 churn 降序，再按 commits 降序
     ranked = sorted(
         agg.items(),
-        key=lambda kv: (kv[1]["added"] + kv[1]["deleted"], kv[1]["commits"]),
-        reverse=True,
+        key=lambda kv: (
+            -(kv[1]["added"] + kv[1]["deleted"]),
+            -kv[1]["commits"],
+            kv[0][0],
+            kv[0][1],
+        ),
     )
 
     result = [
@@ -121,6 +197,7 @@ def top_contributors(
         )
         for (name, email), data in ranked[:top_n]
     ]
+    _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
     return result
 
 
@@ -129,9 +206,17 @@ def top_contributors(
 # ---------------------------------------------------------------------------
 
 
-def branch_activity(repo_path: str | Path) -> list[BranchActivity]:
+def branch_activity(
+    repo_path: str | Path,
+    *,
+    _degradations: list[GitDegradation] | None = None,
+) -> list[BranchActivity]:
     """遍历所有本地分支，返回各自的活跃度快照。"""
+    diagnostics = _degradations if _degradations is not None else []
     with _open_repo(repo_path) as repo:
+        if not _record_shallow_history(repo, diagnostics):
+            _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
+            return []
         results: list[BranchActivity] = []
 
         for branch in repo.branches:
@@ -140,28 +225,29 @@ def branch_activity(repo_path: str | Path) -> list[BranchActivity]:
             if not commits:
                 continue
             last = commits[0]
+            message = last.message
+            if isinstance(message, bytes):
+                message = message.decode("utf-8", errors="replace")
 
             # 粗略估算：直接遍历全部可能比较慢，这里用 branch.commit_count() 不可靠，
             # 实际项目建议限制在 master/main 等关键分支上。
             # 为避免性能问题，这里用 rev-list --count 拿 commit_count。
-            try:
-                count_text = repo.git.rev_list("--count", branch.name).strip()
-                commit_count = int(count_text)
-            except Exception:
-                commit_count = 0
+            count_text = repo.git.rev_list("--count", branch.name).strip()
+            commit_count = int(count_text)
 
             results.append(
                 BranchActivity(
                     name=branch.name,
                     commit_count=commit_count,
                     last_commit_datetime=last.committed_datetime,
-                    last_author=last.author.name,
-                    last_message=last.message.strip().split("\n")[0][:80],
+                    last_author=last.author.name or "",
+                    last_message=message.strip().split("\n")[0][:80],
                 )
             )
 
+        _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
         # 按最近提交时间降序
-        results.sort(key=lambda b: b.last_commit_datetime, reverse=True)
+        results.sort(key=lambda b: (-b.last_commit_datetime.timestamp(), b.name))
         return results
 
 
@@ -174,6 +260,8 @@ def knowledge_islands(
     repo_path: str | Path,
     min_churn: int = 0,
     exclude_paths: Sequence[str] = (),
+    *,
+    _degradations: list[GitDegradation] | None = None,
 ) -> list[FileOwnership]:
     """返回所有"知识孤岛"文件——只有 1 位贡献者改动过的文件。
 
@@ -182,14 +270,18 @@ def knowledge_islands(
     """
     import fnmatch
 
+    diagnostics = _degradations if _degradations is not None else []
     # file_path -> {author: churn}
     ownership: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     with _open_repo(repo_path) as repo:
+        if not _record_shallow_history(repo, diagnostics):
+            _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
+            return []
         for commit in repo.iter_commits():
             if len(commit.parents) > 1:
                 continue
-            author = commit.author.name
+            author = commit.author.name or ""
             for path, stats in _iter_file_changes(commit):
                 churn = stats.get("insertions", 0) + stats.get("deletions", 0)
                 ownership[path][author] += churn
@@ -216,7 +308,8 @@ def knowledge_islands(
         )
 
     # 按孤岛的绝对改动量降序
-    islands.sort(key=lambda o: next(iter(o.contributors.values())), reverse=True)
+    islands.sort(key=lambda o: (-next(iter(o.contributors.values())), o.file_path))
+    _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
     return islands
 
 
@@ -225,15 +318,24 @@ def knowledge_islands(
 # ---------------------------------------------------------------------------
 
 
-def file_ownership(repo_path: str | Path, top_n: int = 100) -> list[FileOwnership]:
+def file_ownership(
+    repo_path: str | Path,
+    top_n: int = 100,
+    *,
+    _degradations: list[GitDegradation] | None = None,
+) -> list[FileOwnership]:
     """返回每个文件的所有权分布，按主要贡献者的占比降序。"""
+    diagnostics = _degradations if _degradations is not None else []
     ownership: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     with _open_repo(repo_path) as repo:
+        if not _record_shallow_history(repo, diagnostics):
+            _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
+            return []
         for commit in repo.iter_commits():
             if len(commit.parents) > 1:
                 continue
-            author = commit.author.name
+            author = commit.author.name or ""
             for path, stats in _iter_file_changes(commit):
                 churn = stats.get("insertions", 0) + stats.get("deletions", 0)
                 ownership[path][author] += churn
@@ -243,7 +345,7 @@ def file_ownership(repo_path: str | Path, top_n: int = 100) -> list[FileOwnershi
         total = sum(contrib.values())
         if total == 0:
             continue
-        dominant = max(contrib, key=contrib.get)
+        dominant = max(contrib, key=lambda author: (contrib[author], author))
         results.append(
             FileOwnership(
                 file_path=path,
@@ -254,7 +356,8 @@ def file_ownership(repo_path: str | Path, top_n: int = 100) -> list[FileOwnershi
         )
 
     # 按 dominant_ratio 降序，高占比 → 知识孤岛风险高
-    results.sort(key=lambda r: r.dominant_ratio, reverse=True)
+    results.sort(key=lambda r: (-r.dominant_ratio, r.file_path))
+    _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
     return results[:top_n]
 
 
@@ -267,17 +370,25 @@ def commit_frequency(
     repo_path: str | Path,
     group_by: str = "day",
     since: str | None = None,
+    *,
+    _degradations: list[GitDegradation] | None = None,
 ) -> CommitFrequency:
     """按时间维度统计提交频率。
 
     ``group_by`` 支持 ``"day"``（YYYY-MM-DD）和 ``"hour"``（0-23）两种分组。
     """
-    kwargs: dict = {}
+    kwargs: dict[str, Any] = {}
     if since:
-        kwargs["since"] = _normalize_since(since)
+        normalized_since = _normalize_since(since)
+        if normalized_since is not None:
+            kwargs["since"] = normalized_since
 
+    diagnostics = _degradations if _degradations is not None else []
     counter: Counter[str] = Counter()
     with _open_repo(repo_path) as repo:
+        if not _record_shallow_history(repo, diagnostics):
+            _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
+            return CommitFrequency(counts={}, total_commits=0)
         for commit in repo.iter_commits(**kwargs):
             if len(commit.parents) > 1:
                 continue
@@ -291,7 +402,62 @@ def commit_frequency(
                 raise ValueError(f"未知 group_by: {group_by!r}，可选 'day' / 'hour'")
             counter[key] += 1
 
+    _warn_if_unreported(diagnostics, caller_supplied_diagnostics=_degradations is not None)
     return CommitFrequency(
-        counts=dict(counter),
+        counts=dict(sorted(counter.items())),
         total_commits=sum(counter.values()),
     )
+
+
+def top_contributors_with_degradations(
+    repo_path: str | Path,
+    top_n: int = 20,
+    since: str | None = None,
+) -> GitAnalysisResult[list[ContributorStats]]:
+    """Return contributor statistics and machine-readable history limitations."""
+    degradations: list[GitDegradation] = []
+    result = top_contributors(repo_path, top_n, since, _degradations=degradations)
+    return GitAnalysisResult(result, _ordered_degradations(degradations))
+
+
+def branch_activity_with_degradations(
+    repo_path: str | Path,
+) -> GitAnalysisResult[list[BranchActivity]]:
+    """Return branch activity and machine-readable history limitations."""
+    degradations: list[GitDegradation] = []
+    result = branch_activity(repo_path, _degradations=degradations)
+    return GitAnalysisResult(result, _ordered_degradations(degradations))
+
+
+def knowledge_islands_with_degradations(
+    repo_path: str | Path,
+    min_churn: int = 0,
+    exclude_paths: Sequence[str] = (),
+) -> GitAnalysisResult[list[FileOwnership]]:
+    """Return knowledge-island results and history limitations."""
+    degradations: list[GitDegradation] = []
+    result = knowledge_islands(
+        repo_path, min_churn, exclude_paths, _degradations=degradations
+    )
+    return GitAnalysisResult(result, _ordered_degradations(degradations))
+
+
+def file_ownership_with_degradations(
+    repo_path: str | Path,
+    top_n: int = 100,
+) -> GitAnalysisResult[list[FileOwnership]]:
+    """Return ownership results and machine-readable history limitations."""
+    degradations: list[GitDegradation] = []
+    result = file_ownership(repo_path, top_n, _degradations=degradations)
+    return GitAnalysisResult(result, _ordered_degradations(degradations))
+
+
+def commit_frequency_with_degradations(
+    repo_path: str | Path,
+    group_by: str = "day",
+    since: str | None = None,
+) -> GitAnalysisResult[CommitFrequency]:
+    """Return commit frequency and machine-readable history limitations."""
+    degradations: list[GitDegradation] = []
+    result = commit_frequency(repo_path, group_by, since, _degradations=degradations)
+    return GitAnalysisResult(result, _ordered_degradations(degradations))

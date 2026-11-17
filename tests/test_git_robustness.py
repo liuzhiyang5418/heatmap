@@ -204,7 +204,9 @@ def test_diff_failure_is_not_misreported_as_shallow(tmp_path: Path, shallow: boo
         ):
             GitHistory().collect_with_degradations(target)
         assert caught.value.__cause__ is failure
-        assert "bad object" in str(caught.value)
+        assert "GitCommandError" in str(caught.value)
+        assert str(target) not in str(caught.value)
+        assert "bad object" in str(caught.value.__cause__)
 
 
 @pytest.mark.parametrize("fail", [False, True])

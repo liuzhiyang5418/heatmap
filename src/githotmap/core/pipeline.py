@@ -44,7 +44,9 @@ def _guard(stage: str, stats: AnalysisStats, clock: Clock) -> Iterator[None]:
                 code=DegradationCode.STAGE_FAILED,
                 path=None,
                 summary=f"{stage} stage failed",
-                detail=str(exc),
+                # Exception text often embeds absolute paths or host-specific data.
+                # Keep diagnostics useful and fingerprints reproducible across machines.
+                detail=type(exc).__name__,
             )
         )
     finally:
@@ -115,8 +117,20 @@ class AnalysisPipeline:
 
         # 1. 采集
         with _guard("git", stats, self.clock):
-            records = self.history.collect(repo_path, since=since or cfg.since)
+            collected = self.history.collect_with_degradations(
+                repo_path, since=since or cfg.since
+            )
+            records = collected.records
             stats.commits_seen = len(records)
+            stats.degradations.extend(
+                Degradation(
+                    stage=item.stage,
+                    code=DegradationCode(item.code),
+                    path=item.path,
+                    summary=item.summary,
+                )
+                for item in collected.degradations
+            )
 
         # 2. 指标聚合
         with _guard("metrics", stats, self.clock):
@@ -145,9 +159,19 @@ class AnalysisPipeline:
                     m.import_count = float(len(struct.imports))
 
         # 2.6 SATD 信号（注意：如果 scanner 挂了，这里 scan 可能是 None，所以要判断）
+        todo_scan = None
         if scan is not None:
             with _guard("todo", stats, self.clock):
                 todo_scan = TodoDetector().detect(scan)
+                stats.degradations.extend(
+                    Degradation(
+                        stage=item.stage,
+                        code=DegradationCode(item.code),
+                        path=item.path,
+                        summary=item.summary,
+                    )
+                    for item in todo_scan.degradations
+                )
                 todo_by_path: dict[str, int] = {}
                 for item in todo_scan.todos:
                     todo_by_path[item.path] = todo_by_path.get(item.path, 0) + 1
@@ -187,7 +211,24 @@ class AnalysisPipeline:
                 for f in files:
                     struct = struct_by_path.get(f.path)
                     if struct is not None and hasattr(struct, "limitations") and struct.limitations:
-                        f.limitations.extend(struct.limitations)
+                        f.limitations.extend(
+                            code for code in struct.limitations if code not in f.limitations
+                        )
+                        stats.degradations.extend(
+                            Degradation(
+                                stage="scanner",
+                                code=DegradationCode(code),
+                                path=f.path,
+                                summary=f"file analysis limited: {code}",
+                            )
+                            for code in struct.limitations
+                        )
+                    if todo_scan is not None:
+                        f.limitations.extend(
+                            item.code
+                            for item in todo_scan.degradations
+                            if item.path == f.path and item.code not in f.limitations
+                        )
 
             if composite is not None:
                 weights = COMPOSITE_WEIGHTS.get(composite, [])
@@ -207,8 +248,10 @@ class AnalysisPipeline:
             stats.degradations_by_code[code] = stats.degradations_by_code.get(code, 0) + 1
         for f in files:
             for code in f.limitations:
-                stats.degradations_by_code[code] = stats.degradations_by_code.get(code, 0) + 1
-        stats.files_degraded = sum(1 for f in files if f.limitations)
+                stats.degradations_by_code.setdefault(code, 0)
+        degraded_paths = {f.path for f in files if f.limitations}
+        degraded_paths.update(d.path for d in stats.degradations if d.path is not None)
+        stats.files_degraded = len(degraded_paths)
 
         # 8. 严格模式同时拦截阶段失败和文件级降级，且不受输出 limit 影响。
         if cfg.degrade_policy == "strict" and (

@@ -290,7 +290,9 @@ class GitHistory:
                             )
                         )
         except Exception as exc:
-            raise GitError(f"无法采集仓库 {repo_path}: {exc}") from exc
+            # Keep the public error stable and host-independent; __cause__ retains
+            # the original exception for callers that need detailed diagnostics.
+            raise GitError(f"无法采集仓库: {type(exc).__name__}") from exc
 
         degradations.sort(key=lambda d: (d.path or "", d.code))
         return GitCollectResult(records=records, degradations=degradations)

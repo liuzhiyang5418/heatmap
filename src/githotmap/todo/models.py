@@ -77,6 +77,22 @@ class TodoItem:
 
 
 @dataclass(slots=True)
+class TodoDegradation:
+    stage: str
+    code: str
+    path: str
+    summary: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "stage": self.stage,
+            "code": self.code,
+            "path": self.path,
+            "summary": self.summary,
+        }
+
+
+@dataclass(slots=True)
 class TodoScan:
     """一次检测的顶层产出（对应 M2 的 ``RepositoryScan``）。"""
 
@@ -84,6 +100,7 @@ class TodoScan:
     path_base: str = ""
     #: 全部技术债条目，已按 ``(path, lineno, column)`` 升序排序（确定性要求）。
     todos: list[TodoItem] = field(default_factory=list)
+    degradations: list[TodoDegradation] = field(default_factory=list)
 
     @property
     def total_count(self) -> int:
@@ -135,4 +152,5 @@ class TodoScan:
             "total_count": self.total_count,
             "counts_by_kind": self.count_by_kind(),
             "todos": [t.to_dict() for t in self.todos],
+            "degradations": [item.to_dict() for item in self.degradations],
         }

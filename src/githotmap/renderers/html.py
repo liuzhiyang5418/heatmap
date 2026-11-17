@@ -41,6 +41,12 @@ _HTML_TEMPLATE = """<!doctype html>
   .panel { background:var(--panel); border:1px solid #232b40; border-radius:10px;
            padding:16px 18px; margin-top:22px; }
   .panel h2 { margin:0 0 12px; font-size:17px; }
+  .coverage { display:flex; flex-wrap:wrap; gap:20px; padding:14px 0; border-bottom:1px solid #232b40; }
+  .coverage-item { min-width:110px; }
+  .coverage-item strong { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+  .coverage-item span, .degradation-list { color:var(--muted); font-size:12px; }
+  .degradation-list { margin-top:12px; }
+  .degradation-list li { margin:4px 0; overflow-wrap:anywhere; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:left; padding:7px 10px; border-bottom:1px solid #232b40; white-space:nowrap; }
   th { color:var(--accent); cursor:pointer; user-select:none; position:sticky; top:0; background:var(--panel); }
@@ -66,6 +72,14 @@ _HTML_TEMPLATE = """<!doctype html>
   <p class="note">Scores are candidate signals for human review. The current model marks both empty files and missing file data as missing. Status does not establish scan completeness; sample confidence is a commit-count heuristic, not a probability.</p>
 </header>
 <main>
+  <section class="panel" aria-label="Analysis coverage">
+    <h2>Analysis coverage</h2>
+    <div id="coverage" class="coverage"></div>
+    <details id="degradation-details" class="degradation-list">
+      <summary>Degradation details</summary>
+      <ul id="degradation-list"></ul>
+    </details>
+  </section>
   <div class="panel"><div id="heatmap"></div></div>
   <div class="panel">
     <h2>File details (click a heading to sort)</h2>
@@ -111,9 +125,46 @@ function reasonsOf(f) {
 }
 
 function statusText(f) {
+  if (f.limitations && f.limitations.length) return `Limited: ${f.limitations.join(', ')}`;
   if (f.status === 'missing') return 'Empty file or missing data';
   if (f.status === 'low_confidence') return 'Limited sample';
   return f.status === 'ok' || !f.status ? 'No issue flagged' : String(f.status);
+}
+
+function renderCoverage() {
+  const stats = DATA.stats || {};
+  const container = document.getElementById('coverage');
+  // Keep the report script tolerant of minimal host DOMs used by embedders/tests.
+  if (!container) return;
+  const items = [
+    ['files_matched', 'Matched'],
+    ['files_emitted', 'Emitted'],
+    ['files_degraded', 'Degraded']
+  ];
+  items.forEach(([key, label]) => {
+    const item = document.createElement('div');
+    item.className = 'coverage-item';
+    item.appendChild(textElement('strong', String(stats[key] ?? 0)));
+    item.appendChild(textElement('span', label));
+    container.appendChild(item);
+  });
+  const counts = stats.degradations_by_code || {};
+  Object.keys(counts).sort().forEach(code => {
+    const item = document.createElement('div');
+    item.className = 'coverage-item';
+    item.appendChild(textElement('strong', String(counts[code])));
+    item.appendChild(textElement('span', code));
+    container.appendChild(item);
+  });
+  const degradations = stats.degradations || [];
+  const details = document.getElementById('degradation-details');
+  const list = document.getElementById('degradation-list');
+  if (details) details.hidden = degradations.length === 0;
+  if (!list) return;
+  degradations.forEach(item => {
+    const path = item.path ? ` (${item.path})` : '';
+    list.appendChild(textElement('li', `[${item.stage}] ${item.code}: ${item.summary}${path}`));
+  });
 }
 
 function textElement(tag, text, className = '') {
@@ -239,6 +290,7 @@ function wireSort() {
 }
 
 renderMeta();
+renderCoverage();
 renderHeatmap(DATA.files || []);
 renderTable(DATA.files || []);
 wireSort();

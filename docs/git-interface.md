@@ -26,15 +26,17 @@ summary 使用固定文本，不包含机器路径或原始异常消息。诊断
 
 ## 与 Member 5 的衔接
 
-WP-1 需将流水线的 `history.collect()` 替换为 `collect_with_degradations()`，
-把 records 传给指标聚合，将 degradations 映射进公共诊断和统计，供严格模式及
-HTML 展示。此 PR 保留旧流水线兼容性，不代表端到端 NFR-2 已验收。
+分析流水线已使用 `collect_with_degradations()`，将 Git 诊断映射到公共统计、严格模式
+与 HTML/JSON 输出。`GitHistory.collect()` 保留为兼容接口，只返回 records；调用方需要
+审计信息时应使用 `collect_with_degradations()`。
 
-`core.analysis` 的历史分析函数仍使用旧的改动迭代接口，浅克隆边界跳过时不返回
-诊断；本次可审计接口的范围是 GitHistory 采集门面。
+Member 4 的深度历史分析也提供 `*_with_degradations()` 入口，统一返回结果和空仓库/浅克隆
+原因码，`history` CLI 会把限制打印到标准错误。原有 list/值返回接口保留兼容，但遇到空仓库
+或浅克隆会发出 `RuntimeWarning`，建议新调用改用可审计入口。
 
 ## 验证
 
-`python -m pytest tests/test_git.py tests/test_git_robustness.py tests/test_analysis.py`
+`python -m pytest tests/test_git.py tests/test_git_robustness.py tests/test_analysis.py tests/test_analysis_robustness.py`
 覆盖中文路径、真实 file:// 浅克隆、空仓库、非仓库、完整及浅仓库非边界 diff
-故障、资源释放、JSON 序列化与同输入双跑一致性。跨平台 CI 由 WP-8 验证。
+故障、资源释放、深度分析结果的浅克隆诊断、JSON 序列化与同输入双跑一致性。跨平台 CI
+由当前 Windows/Linux 工作流验证。

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from githotmap.core.diagnostics import AnalysisStats, Degradation, DegradationCode
 from githotmap.core.models import AnalysisResult, FileMetrics, FileResult, ScoringMode
 from githotmap.renderers import registry
 
@@ -35,6 +36,32 @@ def test_html_render_is_self_contained_and_embeds_data() -> None:
     assert "src/main.py" in html  # 数据已内嵌
     assert "scoreColor" in html  # 交互 JS 存在
     assert "cdn" not in html.lower()  # 无外部资源引用
+
+
+def test_html_exposes_coverage_and_degradation_details() -> None:
+    result = _result()
+    result.stats = AnalysisStats(
+        files_matched=4,
+        files_emitted=3,
+        files_degraded=1,
+        degradations_by_code={"syntax-error": 1},
+        degradations=[
+            Degradation(
+                stage="scanner",
+                code=DegradationCode.SYNTAX_ERROR,
+                path="src/broken.py",
+                summary="file could not be parsed",
+            )
+        ],
+    )
+
+    html = registry.render(result, "html")
+
+    assert 'id="coverage"' in html
+    assert 'id="degradation-details"' in html
+    assert '"files_degraded": 1' in html
+    assert '"code": "syntax-error"' in html
+    assert '"path": "src/broken.py"' in html
 
 
 def test_render_unknown_format_raises() -> None:
