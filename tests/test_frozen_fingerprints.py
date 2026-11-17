@@ -17,6 +17,8 @@ _CLOCK = FixedClock(datetime(2030, 1, 1, tzinfo=timezone.utc))
 def _snapshot(root: Path, files: dict[str, str], *, second_commit: bool = False) -> Path:
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "core.autocrlf", "false"], check=True)
+    (root / ".gitattributes").write_text("* text eol=lf\n", encoding="utf-8")
     for name, content in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -46,9 +48,9 @@ def test_three_frozen_snapshots_have_stable_fingerprints(tmp_path: Path) -> None
     ]
     fingerprints = [AnalysisPipeline(clock=_CLOCK).run(path).fingerprint() for path in snapshots]
     assert fingerprints == [
-        "155089b094f499314774c3cc0e36771d5e2c1ebfa4dc80569313e4c69e59c32c",
-        "bee9357345067482412ba92499874d835d08f2fd76b5667fc5a447b8c10e1802",
-        "f887b373c2243b32d0867f0dc99cba25aa2c71857cfe0f961e7bce0dd837dfbe",
+        "aa59c81e3a0d9bb3888eb3f376362dbb9041bbd4d8ec788d4be0ad164cb98499",
+        "3c748e49ac1d6d1d5a0c0f82cb688c870caa39fa912f5e4eb83296f6198d4512",
+        "d851c92d0be4b2e1759c111f78fbac292a684769e68694cf4543631b562551b3",
     ]
 
 

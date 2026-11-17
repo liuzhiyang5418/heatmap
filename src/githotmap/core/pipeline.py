@@ -150,6 +150,19 @@ class AnalysisPipeline:
             scan_cfg = ScanConfig(exclude_patterns=list(cfg.exclude))
             scan = scan_repository(repo_path, config=scan_cfg, clock=self.clock)
             struct_by_path = scan.by_path()
+            # Record every scanner limitation, including files that have no Git
+            # history record (for example an untracked symlink).  Such files are
+            # still part of the scan coverage and must not disappear silently.
+            for struct in scan.files:
+                stats.degradations.extend(
+                    Degradation(
+                        stage="scanner",
+                        code=DegradationCode(code),
+                        path=struct.path,
+                        summary=f"file analysis limited: {code}",
+                    )
+                    for code in struct.limitations
+                )
             for path, m in metrics_map.items():
                 struct = struct_by_path.get(path)
                 if struct is not None:
@@ -213,15 +226,6 @@ class AnalysisPipeline:
                     if struct is not None and hasattr(struct, "limitations") and struct.limitations:
                         f.limitations.extend(
                             code for code in struct.limitations if code not in f.limitations
-                        )
-                        stats.degradations.extend(
-                            Degradation(
-                                stage="scanner",
-                                code=DegradationCode(code),
-                                path=f.path,
-                                summary=f"file analysis limited: {code}",
-                            )
-                            for code in struct.limitations
                         )
                     if todo_scan is not None:
                         f.limitations.extend(
