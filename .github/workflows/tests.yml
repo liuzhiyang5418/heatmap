@@ -26,3 +26,19 @@ jobs:
         env:
           HEATMAP_CHROME: /usr/bin/google-chrome
         run: python -m pytest tests/test_html_browser.py
+
+  nfr-report-quality:
+    # This first gate covers the report changes; the existing repository-wide
+    # lint and typing findings are recorded in the Sprint 2 acceptance notes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install quality tools
+        run: python -m pip install -e '.[dev,web]' 'ruff==0.17.5' 'mypy==2.4.1'
+      - name: Lint NFR report and checks
+        run: python -m ruff check src/githotmap/renderers/html.py tests/test_html_browser.py tests/test_nfr2_system.py
+      - name: Type-check NFR report
+        run: python -m mypy src/githotmap/renderers/html.py --follow-imports=silent
