@@ -164,12 +164,12 @@ class AnalysisPipeline:
                     for code in struct.limitations
                 )
             for path, m in metrics_map.items():
-                struct = struct_by_path.get(path)
-                if struct is not None:
-                    m.max_cyclomatic_complexity = float(struct.max_cyclomatic_complexity)
-                    m.max_nesting_depth = float(struct.max_nesting_depth)
-                    m.symbol_count = float(struct.symbol_count)
-                    m.import_count = float(len(struct.imports))
+                structure = struct_by_path.get(path)
+                if structure is not None:
+                    m.max_cyclomatic_complexity = float(structure.max_cyclomatic_complexity)
+                    m.max_nesting_depth = float(structure.max_nesting_depth)
+                    m.symbol_count = float(structure.symbol_count)
+                    m.import_count = float(len(structure.imports))
 
         # 2.6 SATD 信号（注意：如果 scanner 挂了，这里 scan 可能是 None，所以要判断）
         todo_scan = None
@@ -222,10 +222,16 @@ class AnalysisPipeline:
             if scan is not None:
                 struct_by_path = scan.by_path()
                 for f in files:
-                    struct = struct_by_path.get(f.path)
-                    if struct is not None and hasattr(struct, "limitations") and struct.limitations:
+                    structure = struct_by_path.get(f.path)
+                    if (
+                        structure is not None
+                        and hasattr(structure, "limitations")
+                        and structure.limitations
+                    ):
                         f.limitations.extend(
-                            code for code in struct.limitations if code not in f.limitations
+                            code
+                            for code in structure.limitations
+                            if code not in f.limitations
                         )
                     if todo_scan is not None:
                         f.limitations.extend(
