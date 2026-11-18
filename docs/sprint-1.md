@@ -31,7 +31,7 @@ The supplied requirements identify performance, robustness and auditability, and
 - Scenario and candidate measures: test each of 12 agreed fault or boundary classes; default mode should not crash and should expose degradation or skip reasons; strict mode should return a nonzero exit code for agreed degradations. Freeze the actual classes, denominator, and platforms before testing.
 - Alternative A: fail immediately on an exception. This is simpler but cannot return results for other analyzable files.
 - Proposed B: return best-effort results by default and propagate machine-readable reason codes and coverage counts from scanner, TODO, and Git modules through `AnalysisResult` to HTML/JSON; offer a separate strict mode. This requires M2–M6 to agree status and error semantics.
-- Current gap: scanner has `limitations` and `ScanStats`, but the [pipeline](../src/githotmap/core/pipeline.py) can silently fall back on scanner or TODO exceptions. This PR displays existing `status` and `confidence`; coverage and reason propagation remain incomplete. `size_bytes == 0` does not distinguish an empty file from missing data.
+- Implementation status: the [pipeline](../src/githotmap/core/pipeline.py) now propagates Git, scanner, and TODO diagnostics into shared statistics; strict mode rejects recorded degradations; HTML/JSON expose coverage and reason details. Member 4's deep-history APIs also report empty/shallow history through `*_with_degradations()` entry points. The engineering tests pass locally; final fault-list agreement and cross-platform GitHub Actions results are still pending. `size_bytes == 0` still does not distinguish an empty file from missing data.
 - Proposed acceptance: assert exit behavior, reason codes, counts, and HTML/JSON consistency for each class, and retain failing samples. This has not been executed.
 
 ### NFR-3: Reproducibility and verifiability
@@ -39,8 +39,7 @@ The supplied requirements identify performance, robustness and auditability, and
 - Scenario and candidate measures: after fixing the repository commit, worktree, parameters, scoring configuration, clock, tool version, and platform, two normalized outputs should match; compare Windows and Linux under an agreed contract and record the format version and baseline hash.
 - Alternative A: remove only the analysis timestamp before comparison. This is a small change, but metrics can depend on the current time, so it is insufficient by itself.
 - Proposed B: inject a fixed analysis clock; freeze inputs and configuration; define sorting, path, and serialization rules; and retain versions, baselines, and expected hashes. Core-module changes and a baseline change log are required.
-- Current gap: results contain `analyzed_at` and some metrics depend on the current time. There is no deterministic serialization contract, cross-platform experiment, or frozen hash. JSON export in this PR is not reproducibility acceptance evidence.
-- Proposed acceptance: run each of at least three frozen repository snapshots twice, compare normalized outputs and hashes, then validate in cross-platform CI. This has not been executed.
+- Implementation status: an injectable clock, deterministic canonical serialization, SHA-256 fingerprints, and three frozen synthetic Git snapshots with expected hashes are implemented. Local tests pass; the configured Windows/Linux CI matrix has not yet produced remote results. This does not establish equivalence for arbitrary repositories or all Git/tool versions.
 
 ### NFR-1: Performance and scale (candidate)
 

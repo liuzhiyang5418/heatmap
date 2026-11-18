@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import hashlib
 import io
-import time
 import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from githotmap.clock import Clock, SystemClock
 from githotmap.scanner.models import (
     LIMITATION_CODES,
     FileStructure,
@@ -90,8 +90,14 @@ class RepositoryScanner:
     #: 组件唯一名称，便于日志与后续注册表查找。
     name: str = "repository-scanner"
 
-    def __init__(self, config: ScanConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: ScanConfig | None = None,
+        clock: Clock | None = None,
+    ) -> None:
         self.config = config or ScanConfig()
+        # 时间一律从注入的时钟取，便于 NFR-3 冻结夹具固定 scanned_at / elapsed_ms。
+        self.clock: Clock = clock or SystemClock()
 
     # ---- 公共 API ----
     def scan(self, repo_path: str | Path) -> RepositoryScan:
@@ -99,7 +105,7 @@ class RepositoryScanner:
 
         :raises ScanError: ``repo_path`` 不存在或不是目录。
         """
-        started = time.perf_counter()
+        started = self.clock.monotonic()
         root = Path(repo_path)
         if not root.is_dir():
             raise ScanError(f"扫描根目录不存在或不是目录: {root}")
@@ -134,10 +140,14 @@ class RepositoryScanner:
             degradations_by_code={code: by_code.get(code, 0) for code in LIMITATION_CODES},
             excluded_dirs=list(walk.excluded_dirs),
             total_bytes=sum(item.size_bytes for item in files),
-            elapsed_ms=round((time.perf_counter() - started) * 1000.0, 3),
+            elapsed_ms=round((self.clock.monotonic() - started) * 1000.0, 3),
         )
         return RepositoryScan(
-            root=str(root), path_base=str(base), files=files, stats=stats
+            root=str(root),
+            path_base=str(base),
+            files=files,
+            stats=stats,
+            scanned_at=self.clock.now().isoformat(),
         )
 
     # ---- 内部实现 ----
@@ -206,6 +216,7 @@ class RepositoryScanner:
 def scan_repository(
     repo_path: str | Path,
     config: ScanConfig | None = None,
+    clock: Clock | None = None,
 ) -> RepositoryScan:
-    """便捷函数：等价于 ``RepositoryScanner(config).scan(repo_path)``。"""
-    return RepositoryScanner(config).scan(repo_path)
+    """便捷函数：等价于 ``RepositoryScanner(config, clock).scan(repo_path)``。"""
+    return RepositoryScanner(config, clock).scan(repo_path)

@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from githotmap.scanner import Limitation, RepositoryScan
-from githotmap.todo.models import TodoItem, TodoScan
+from githotmap.todo.models import TodoDegradation, TodoItem, TodoScan
 from githotmap.todo.parser import iter_todos
 
 #: 带这些限制标记的文件不参与检测：
@@ -45,6 +45,7 @@ class TodoDetector:
         """
         by_path = scan.by_path()
         todos: list[TodoItem] = []
+        degradations: list[TodoDegradation] = []
         for path in scan.paths():
             # M3-3/M3-6：跳过扫描器已标记为符号链接 / 超大文件 / 二进制的条目。
             structure = by_path.get(path)
@@ -61,9 +62,17 @@ class TodoDetector:
                 # M3-2：单个文件读取失败（FileNotFoundError/PermissionError/
                 # IsADirectoryError 等）时跳过，绝不中断整次检测——
                 # 与接口文档 §4.3「单文件出错绝不影响整体检测」的容错承诺一致。
+                degradations.append(
+                    TodoDegradation(
+                        stage="todo",
+                        code=Limitation.UNREADABLE.value,
+                        path=path,
+                        summary="file could not be read during TODO detection",
+                    )
+                )
                 continue
             todos.extend(iter_todos(path, source))
 
         # 确定性排序（接口文档 §4.2），保证同样输入得到逐字节相同输出。
         todos.sort(key=lambda t: (t.path, t.lineno, t.column))
-        return TodoScan(path_base=scan.path_base, todos=todos)
+        return TodoScan(path_base=scan.path_base, todos=todos, degradations=degradations)

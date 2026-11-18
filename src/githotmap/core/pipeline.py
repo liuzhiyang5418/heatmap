@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import fnmatch
-import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
+from githotmap.clock import Clock, SystemClock
 from githotmap.config.config import COMPOSITE_WEIGHTS, ScoringConfig
 from githotmap.core.diagnostics import (
     AnalysisDegradedError,
@@ -32,9 +32,9 @@ from githotmap.todo import TodoDetector
 
 
 @contextmanager
-def _guard(stage: str, stats: AnalysisStats) -> Iterator[None]:
+def _guard(stage: str, stats: AnalysisStats, clock: Clock) -> Iterator[None]:
     """捕获阶段异常并记录统计信息，防止静默失败。"""
-    start = time.perf_counter()
+    start = clock.monotonic()
     try:
         yield
     except Exception as exc:  # noqa: BLE001 —— 阶段降级必须隔离所有实现异常
@@ -44,11 +44,13 @@ def _guard(stage: str, stats: AnalysisStats) -> Iterator[None]:
                 code=DegradationCode.STAGE_FAILED,
                 path=None,
                 summary=f"{stage} stage failed",
-                detail=str(exc),
+                # Exception text often embeds absolute paths or host-specific data.
+                # Keep diagnostics useful and fingerprints reproducible across machines.
+                detail=type(exc).__name__,
             )
         )
     finally:
-        stats.stage_elapsed_ms[stage] = (time.perf_counter() - start) * 1000.0
+        stats.stage_elapsed_ms[stage] = (clock.monotonic() - start) * 1000.0
 
 
 def _resolve_mode(mode: str | ScoringMode | CompositeMode) -> tuple[ScoringMode | None, CompositeMode | None]:
@@ -87,8 +89,14 @@ def _excluded(path: str, patterns: Iterable[str]) -> bool:
 class AnalysisPipeline:
     """高层分析门面：默认零配置即可对仓库运行一次完整分析。"""
 
-    def __init__(self, config: ScoringConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: ScoringConfig | None = None,
+        clock: Clock | None = None,
+    ) -> None:
         self.config = config or ScoringConfig()
+        # 时间一律从注入的时钟取，便于 NFR-3 冻结夹具固定 analyzed_at / age_days / 阶段耗时。
+        self.clock: Clock = clock or SystemClock()
         self.history = GitHistory()
 
     def run(
@@ -108,14 +116,28 @@ class AnalysisPipeline:
         seed_mode = base_mode if base_mode is not None else ScoringMode.HOT
 
         # 1. 采集
-        with _guard("git", stats):
-            records = self.history.collect(repo_path, since=since or cfg.since)
+        with _guard("git", stats, self.clock):
+            collected = self.history.collect_with_degradations(
+                repo_path, since=since or cfg.since
+            )
+            records = collected.records
             stats.commits_seen = len(records)
+            stats.degradations.extend(
+                Degradation(
+                    stage=item.stage,
+                    code=DegradationCode(item.code),
+                    path=item.path,
+                    summary=item.summary,
+                )
+                for item in collected.degradations
+            )
 
         # 2. 指标聚合
-        with _guard("metrics", stats):
+        with _guard("metrics", stats, self.clock):
             metrics_map = aggregate_file_metrics(
                 records,
+                # 显式注入参考时刻，避免 age_days / 近因信号随运行日期漂移（NFR-3）。
+                now=self.clock.now().timestamp(),
                 recent_window_days=cfg.recent_window_days,
                 decay_half_life_days=cfg.decay_half_life_days,
             )
@@ -124,22 +146,45 @@ class AnalysisPipeline:
 
         # 2.5 结构信号
         scan = None
-        with _guard("scanner", stats):
+        with _guard("scanner", stats, self.clock):
             scan_cfg = ScanConfig(exclude_patterns=list(cfg.exclude))
-            scan = scan_repository(repo_path, config=scan_cfg)
+            scan = scan_repository(repo_path, config=scan_cfg, clock=self.clock)
             struct_by_path = scan.by_path()
+            # Record every scanner limitation, including files that have no Git
+            # history record (for example an untracked symlink).  Such files are
+            # still part of the scan coverage and must not disappear silently.
+            for struct in scan.files:
+                stats.degradations.extend(
+                    Degradation(
+                        stage="scanner",
+                        code=DegradationCode(code),
+                        path=struct.path,
+                        summary=f"file analysis limited: {code}",
+                    )
+                    for code in struct.limitations
+                )
             for path, m in metrics_map.items():
-                struct = struct_by_path.get(path)
-                if struct is not None:
-                    m.max_cyclomatic_complexity = float(struct.max_cyclomatic_complexity)
-                    m.max_nesting_depth = float(struct.max_nesting_depth)
-                    m.symbol_count = float(struct.symbol_count)
-                    m.import_count = float(len(struct.imports))
+                structure = struct_by_path.get(path)
+                if structure is not None:
+                    m.max_cyclomatic_complexity = float(structure.max_cyclomatic_complexity)
+                    m.max_nesting_depth = float(structure.max_nesting_depth)
+                    m.symbol_count = float(structure.symbol_count)
+                    m.import_count = float(len(structure.imports))
 
         # 2.6 SATD 信号（注意：如果 scanner 挂了，这里 scan 可能是 None，所以要判断）
+        todo_scan = None
         if scan is not None:
-            with _guard("todo", stats):
+            with _guard("todo", stats, self.clock):
                 todo_scan = TodoDetector().detect(scan)
+                stats.degradations.extend(
+                    Degradation(
+                        stage=item.stage,
+                        code=DegradationCode(item.code),
+                        path=item.path,
+                        summary=item.summary,
+                    )
+                    for item in todo_scan.degradations
+                )
                 todo_by_path: dict[str, int] = {}
                 for item in todo_scan.todos:
                     todo_by_path[item.path] = todo_by_path.get(item.path, 0) + 1
@@ -169,7 +214,7 @@ class AnalysisPipeline:
             })
 
         # 4. 评分
-        with _guard("scoring", stats):
+        with _guard("scoring", stats, self.clock):
             scoring_cfg = replace(cfg, normalization_caps=caps_override)
             files = [score_file(m, seed_mode, scoring_cfg) for m in metrics_map.values()]
 
@@ -177,9 +222,23 @@ class AnalysisPipeline:
             if scan is not None:
                 struct_by_path = scan.by_path()
                 for f in files:
-                    struct = struct_by_path.get(f.path)
-                    if struct is not None and hasattr(struct, "limitations") and struct.limitations:
-                        f.limitations.extend(struct.limitations)
+                    structure = struct_by_path.get(f.path)
+                    if (
+                        structure is not None
+                        and hasattr(structure, "limitations")
+                        and structure.limitations
+                    ):
+                        f.limitations.extend(
+                            code
+                            for code in structure.limitations
+                            if code not in f.limitations
+                        )
+                    if todo_scan is not None:
+                        f.limitations.extend(
+                            item.code
+                            for item in todo_scan.degradations
+                            if item.path == f.path and item.code not in f.limitations
+                        )
 
             if composite is not None:
                 weights = COMPOSITE_WEIGHTS.get(composite, [])
@@ -199,8 +258,10 @@ class AnalysisPipeline:
             stats.degradations_by_code[code] = stats.degradations_by_code.get(code, 0) + 1
         for f in files:
             for code in f.limitations:
-                stats.degradations_by_code[code] = stats.degradations_by_code.get(code, 0) + 1
-        stats.files_degraded = sum(1 for f in files if f.limitations)
+                stats.degradations_by_code.setdefault(code, 0)
+        degraded_paths = {f.path for f in files if f.limitations}
+        degraded_paths.update(d.path for d in stats.degradations if d.path is not None)
+        stats.files_degraded = len(degraded_paths)
 
         # 8. 严格模式同时拦截阶段失败和文件级降级，且不受输出 limit 影响。
         if cfg.degrade_policy == "strict" and (
@@ -215,4 +276,6 @@ class AnalysisPipeline:
             files=ranked_files,
             folders=ranked_folders,
             stats=stats,  # 注入统计！
+            # 从注入时钟取时刻：FixedClock 下双跑结果完全一致（NFR-3.1）。
+            analyzed_at=self.clock.now().isoformat(),
         )

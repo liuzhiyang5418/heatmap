@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
+from githotmap.clock import SystemClock
 from githotmap.core.diagnostics import AnalysisStats
 
 
@@ -78,8 +81,8 @@ class FileMetrics:
     # SATD 信号（由 todo 模块注入）
     todo_count: float = 0.0
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, deterministic: bool = False) -> dict[str, Any]:
+        payload = {
             "path": self.path,
             "size_bytes": self.size_bytes,
             "lines_of_code": self.lines_of_code,
@@ -98,6 +101,7 @@ class FileMetrics:
             "import_count": self.import_count,
             "todo_count": self.todo_count,
         }
+        return cast(dict[str, Any], _normalize_result(payload, deterministic=deterministic))
 
 
 @dataclass(slots=True)
@@ -158,8 +162,8 @@ class FileResult:
     def age_days(self) -> float:
         return self.metrics.age_days
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, deterministic: bool = False) -> dict[str, Any]:
+        payload = {
             "path": self.path,
             "metrics": self.metrics.to_dict(),
             "recency_signal": self.recency_signal,
@@ -174,6 +178,7 @@ class FileResult:
             "confidence": self.confidence,
             "limitations": list(self.limitations),
         }
+        return cast(dict[str, Any], _normalize_result(payload, deterministic=deterministic))
 
 
 @dataclass(slots=True)
@@ -207,18 +212,57 @@ class AnalysisResult:
     folders: list[FolderResult] = field(default_factory=list)
     stats: AnalysisStats = field(default_factory=AnalysisStats)
     schema_version: str = "1.0"
-    analyzed_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    analyzed_at: str = field(default_factory=lambda: SystemClock().now().isoformat())
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, deterministic: bool = False) -> dict[str, Any]:
+        payload = {
             "schema_version": self.schema_version,
             "repo_path": self.repo_path,
             "repo_urn": self.repo_urn,
             "mode": self.mode,
             "analyzed_at": self.analyzed_at,
-            "files": [f.to_dict() for f in self.files],
+            "files": [f.to_dict(deterministic=deterministic) for f in self.files],
             "folders": [f.to_dict() for f in self.folders],
             "stats": self.stats.to_dict(),
         }
+        return cast(dict[str, Any], _normalize_result(payload, deterministic=deterministic))
+
+    def canonical(self) -> str:
+        """Stable JSON excluding runtime clocks and machine-specific repository identity."""
+        payload = self.to_dict(deterministic=True)
+        payload.pop("repo_path", None)
+        payload.pop("repo_urn", None)
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+
+    def fingerprint(self) -> str:
+        """Return the lowercase SHA-256 digest of :meth:`canonical`."""
+        return hashlib.sha256(self.canonical().encode("utf-8")).hexdigest()
+
+
+_TIME_FIELDS = {"analyzed_at", "scanned_at", "elapsed_ms", "stage_elapsed_ms"}
+_PATH_FIELDS = {"path", "repo_path", "path_base", "root"}
+
+
+def _normalize_result(value: Any, *, deterministic: bool, key: str = "") -> Any:
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for name, item in value.items():
+            if deterministic and name in _TIME_FIELDS:
+                continue
+            normalized[name] = _normalize_result(item, deterministic=deterministic, key=name)
+        return normalized
+    if isinstance(value, list):
+        return [_normalize_result(item, deterministic=deterministic, key=key) for item in value]
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("AnalysisResult 中不能包含 NaN 或无穷值")
+        return round(value, 6) if deterministic else value
+    if isinstance(value, str) and key in _PATH_FIELDS:
+        return value.replace("\\", "/")
+    return value

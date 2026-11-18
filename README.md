@@ -105,8 +105,10 @@ To run the browser interaction test, set `HEATMAP_CHROME` to a local Chrome or C
 
 The [Sprint 1 record](docs/sprint-1.md) covers user stories, proposed architecture, acceptance status, and team decisions still needed.
 
+NFR-2 robustness/auditability and NFR-3 reproducibility contracts, test scope, and remaining acceptance limits are tracked in [docs/nfr2-nfr3.md](docs/nfr2-nfr3.md).
+
 ## Research and evaluation
 
 The [research index](docs/research/README.md) links the initial six-paper comparison, design rationale, open-source tool observations, and a planned evaluation.
 
-Scores are heuristic signals for inspection and prioritization; they do not establish technical debt, defect probability, repair effort, or financial return. The `complexity` mode combines several signals and is not AST cyclomatic complexity. The pipeline counts TODO candidates but does not show the original comments or line numbers; scanner or detection failures can still silently fall back. Results reported in research papers are not evidence that this project achieved the same effects.
+Scores are heuristic signals for inspection and prioritization; they do not establish technical debt, defect probability, repair effort, or financial return. The `complexity` mode combines several signals and is not AST cyclomatic complexity. The pipeline counts TODO candidates but does not show the original comments or line numbers. Pipeline failures are exposed as degradation diagnostics; legacy deep-history functions warn for empty or shallow repositories, while their `*_with_degradations` counterparts return structured reasons. Results reported in research papers are not evidence that this project achieved the same effects.

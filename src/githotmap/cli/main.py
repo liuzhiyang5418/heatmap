@@ -6,6 +6,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from githotmap import __version__
 from githotmap.config.config import ScoringConfig
@@ -128,21 +129,38 @@ def _run_analyze(args: argparse.Namespace) -> int:
 
 def _run_history(args: argparse.Namespace) -> int:
     from githotmap.core.analysis import (
-        branch_activity,
-        commit_frequency,
-        file_ownership,
-        knowledge_islands,
-        top_contributors,
+        GitAnalysisResult,
+        branch_activity_with_degradations,
+        commit_frequency_with_degradations,
+        knowledge_islands_with_degradations,
+        top_contributors_with_degradations,
     )
 
     repo_path = args.repo_path
+    reported_diagnostics: set[tuple[str, str | None, str]] = set()
+
+    def report_degradations(outcome: GitAnalysisResult[Any]) -> None:
+        for item in outcome.degradations:
+            key = (item.code, item.path, item.summary)
+            if key in reported_diagnostics:
+                continue
+            reported_diagnostics.add(key)
+            path = f" ({item.path})" if item.path else ""
+            print(
+                f"历史数据不完整 [{item.code}]{path}: {item.summary}",
+                file=sys.stderr,
+            )
 
     # ---- Top Contributors ----
     print("=" * 60)
     print(f"Top Contributors (churn 降序, top {args.top_n})")
     print("-" * 60)
     try:
-        contributors = top_contributors(repo_path, top_n=args.top_n, since=args.since)
+        contributor_outcome = top_contributors_with_degradations(
+            repo_path, top_n=args.top_n, since=args.since
+        )
+        report_degradations(contributor_outcome)
+        contributors = contributor_outcome.result
     except Exception as exc:
         print(f"采集失败: {exc}", file=sys.stderr)
         return 1
@@ -159,7 +177,9 @@ def _run_history(args: argparse.Namespace) -> int:
     print("Branch Activity")
     print("-" * 60)
     try:
-        branches = branch_activity(repo_path)
+        branch_outcome = branch_activity_with_degradations(repo_path)
+        report_degradations(branch_outcome)
+        branches = branch_outcome.result
     except Exception as exc:
         print(f"采集失败: {exc}", file=sys.stderr)
         return 1
@@ -175,7 +195,11 @@ def _run_history(args: argparse.Namespace) -> int:
     print(f"Knowledge Islands (only 1 contributor, min churn={args.min_churn})")
     print("-" * 60)
     try:
-        islands = knowledge_islands(repo_path, min_churn=args.min_churn)
+        islands_outcome = knowledge_islands_with_degradations(
+            repo_path, min_churn=args.min_churn
+        )
+        report_degradations(islands_outcome)
+        islands = islands_outcome.result
     except Exception as exc:
         print(f"采集失败: {exc}", file=sys.stderr)
         return 1
@@ -191,7 +215,11 @@ def _run_history(args: argparse.Namespace) -> int:
     print("Commit Frequency (by day)")
     print("-" * 60)
     try:
-        freq = commit_frequency(repo_path, group_by="day", since=args.since)
+        frequency_outcome = commit_frequency_with_degradations(
+            repo_path, group_by="day", since=args.since
+        )
+        report_degradations(frequency_outcome)
+        freq = frequency_outcome.result
     except Exception as exc:
         print(f"采集失败: {exc}", file=sys.stderr)
         return 1
