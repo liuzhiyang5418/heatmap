@@ -242,7 +242,9 @@ class DegradationCode(str, Enum):
 | `match` 的每个 `case` | |
 | `BoolOp` 中除第一个操作数外的每个操作数（`a and b and c` 计 2） | |
 
-> 这是**静态近似**，不是精确的执行路径数；M5 在使用前请确认口径可接受。
+> 这是**静态近似**，不是精确的执行路径数。Member 5 已在 Sprint 2 确认该口径满足当前
+> `complexity` 评分需求：评分只将 `max_cyclomatic_complexity` 作为经归一化的启发式信号，
+> 不把它解释为精确执行路径数或缺陷概率。
 >
 > 对 `kind == "class"` 的符号，`branch_count` 与 `nesting_depth` 恒为 0，`params` 亦为 0 ——
 > 复杂度一律归属到具体的函数/方法，避免同一段代码被父子符号重复计入。
@@ -540,7 +542,7 @@ CS5351 要求每项非功能需求都要有架构设计方案与理由。扫描�
 | # | 事项 | 需要谁确认 |
 |---|------|------------|
 | 1 | §4.1 路径规范是否作为全组强制契约 | M3/M4/M5/M6 |
-| 2 | `branch_count` 口径（§5.2）是否满足 M5 需求 | Member 5 |
+| 2 | ~~`branch_count` 口径（§5.2）是否满足 M5 需求~~ | ✅ 已解决（Member 5 已确认其作为静态启发式评分信号的用途与解释边界） |
 | 3 | ~~M4 使用 GitPython 与「零第三方依赖」声明的冲突如何取舍~~ | ✅ 已解决（PR #2 已将 GitPython 计入 `dependencies`） |
 | 4 | 最终计入哪几项非功能需求 | Member 1 |
 | 5 | `src/githotmap/py.typed` 缺失（`pyproject.toml` 已声明为 package-data）是否补齐 | Member 1 |
@@ -591,3 +593,4 @@ CS5351 要求每项非功能需求都要有架构设计方案与理由。扫描�
 | v0.1.3 | Sprint 1 | **勘误**：§7.1 示例的拼接基准由 `scan.root` 改为 `scan.path_base`（扫描仓库子目录时前者会得到不存在的路径）；补充单文件读取降级与 PEP 263 编码两条接入要求 | Member 2 |
 | v0.1.4 | Sprint 1 | §4.1 新增**非 ASCII 路径陷阱**：git `core.quotepath` 默认转义路径，会使 M4 与 M2 的键交集为空、历史指标静默丢失；M4 侧须关闭 quotepath | Member 2 |
 | v0.2 | Sprint 2 | **NFR-2 原因码对齐**：新增 §4.5 原因码契约，`LIMITATION_CODES` 成为跨模块唯一来源；`ScanStats` 新增 `degradations_by_code`（键集固定为 `LIMITATION_CODES`，未命中记 0）；补 M5 的 `DegradationCode` 接入约定；新增 `tests/test_scanner_codes.py`（12 用例）锁定取值、结构与覆盖 | Member 2 |
+| v0.2.1 | Sprint 2 | Member 5 确认 §5.2 的 `branch_count` 静态近似口径满足当前复杂度评分需求，并关闭 §11 待确认事项 #2 | Member 5 |
