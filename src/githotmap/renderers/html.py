@@ -41,12 +41,14 @@ _HTML_TEMPLATE = """<!doctype html>
   .panel { background:var(--panel); border:1px solid #232b40; border-radius:10px;
            padding:16px 18px; margin-top:22px; }
   .panel h2 { margin:0 0 12px; font-size:17px; }
-  .coverage { display:flex; flex-wrap:wrap; gap:20px; padding:14px 0; border-bottom:1px solid #232b40; }
-  .coverage-item { min-width:110px; }
-  .coverage-item strong { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
-  .coverage-item span, .degradation-list { color:var(--muted); font-size:12px; }
-  .degradation-list { margin-top:12px; }
-  .degradation-list li { margin:4px 0; overflow-wrap:anywhere; }
+  .coverage { display:flex; flex-wrap:wrap; gap:16px 32px; margin:0; }
+  .coverage div { min-width:140px; }
+  .coverage dt { color:var(--muted); font-size:12px; }
+  .coverage dd { margin:2px 0 0; font-size:19px; font-weight:600; }
+  .diagnostics { padding-left:20px; overflow-wrap:anywhere; }
+  .diagnostics li { margin:6px 0; }
+  .path-link { color:var(--accent); background:none; border:0; padding:0; font:inherit;
+               text-decoration:underline; cursor:pointer; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:left; padding:7px 10px; border-bottom:1px solid #232b40; white-space:nowrap; }
   th { color:var(--accent); cursor:pointer; user-select:none; position:sticky; top:0; background:var(--panel); }
@@ -66,19 +68,21 @@ _HTML_TEMPLATE = """<!doctype html>
   <h1>Git Technical Debt Heatmap</h1>
   <div class="meta" id="meta"></div>
   <div class="legend">
-    <span>Low score</span><div class="bar"></div><span>High score</span><span>Gray: empty file or missing data</span>
+    <span>Low score</span><div class="bar"></div><span>High score</span><span>Gray: empty, missing, or limited data</span>
     <span style="margin-left:16px">Cell area ≈ lines of code (LOC)</span>
   </div>
   <p class="note">Scores are candidate signals for human review. The current model marks both empty files and missing file data as missing. Status does not establish scan completeness; sample confidence is a commit-count heuristic, not a probability.</p>
 </header>
 <main>
-  <section class="panel" aria-label="Analysis coverage">
-    <h2>Analysis coverage</h2>
-    <div id="coverage" class="coverage"></div>
-    <details id="degradation-details" class="degradation-list">
-      <summary>Degradation details</summary>
-      <ul id="degradation-list"></ul>
-    </details>
+  <section class="panel" aria-labelledby="coverage-heading">
+    <h2 id="coverage-heading">Analysis coverage and issues</h2>
+    <dl class="coverage" id="coverage-summary"></dl>
+    <p class="note">Matched files come from Git history before exclusions. Scored files and files with recorded limitations are counted before the display limit. Listed files are shown below. A failed stage can leave later counts unavailable.</p>
+    <h3>Recorded reason codes</h3>
+    <p class="note">Counts include stage events and file limitations, including files outside the displayed selection. File paths are available in the table for listed files.</p>
+    <ul class="diagnostics" id="reason-counts"></ul>
+    <h3>Stage events</h3>
+    <ul class="diagnostics" id="diagnostic-list"></ul>
   </section>
   <div class="panel"><div id="heatmap"></div></div>
   <div class="panel">
@@ -94,6 +98,7 @@ _HTML_TEMPLATE = """<!doctype html>
         <th data-key="age_days">Age (days)</th>
         <th data-key="lines_of_code">LOC</th>
         <th>Data status</th>
+        <th>Limitations</th>
         <th data-key="confidence">Sample confidence</th>
         <th>Score explanations</th>
       </tr></thead>
@@ -124,47 +129,19 @@ function reasonsOf(f) {
   return list;
 }
 
-function statusText(f) {
-  if (f.limitations && f.limitations.length) return `Limited: ${f.limitations.join(', ')}`;
-  if (f.status === 'missing') return 'Empty file or missing data';
-  if (f.status === 'low_confidence') return 'Limited sample';
-  return f.status === 'ok' || !f.status ? 'No issue flagged' : String(f.status);
+function hasStageFailure() {
+  const events = DATA.stats && DATA.stats.degradations;
+  return Array.isArray(events) && events.some(item => item.code === 'stage-failed' && !item.path);
 }
 
-function renderCoverage() {
-  const stats = DATA.stats || {};
-  const container = document.getElementById('coverage');
-  // Keep the report script tolerant of minimal host DOMs used by embedders/tests.
-  if (!container) return;
-  const items = [
-    ['files_matched', 'Matched'],
-    ['files_emitted', 'Emitted'],
-    ['files_degraded', 'Degraded']
-  ];
-  items.forEach(([key, label]) => {
-    const item = document.createElement('div');
-    item.className = 'coverage-item';
-    item.appendChild(textElement('strong', String(stats[key] ?? 0)));
-    item.appendChild(textElement('span', label));
-    container.appendChild(item);
-  });
-  const counts = stats.degradations_by_code || {};
-  Object.keys(counts).sort().forEach(code => {
-    const item = document.createElement('div');
-    item.className = 'coverage-item';
-    item.appendChild(textElement('strong', String(counts[code])));
-    item.appendChild(textElement('span', code));
-    container.appendChild(item);
-  });
-  const degradations = stats.degradations || [];
-  const details = document.getElementById('degradation-details');
-  const list = document.getElementById('degradation-list');
-  if (details) details.hidden = degradations.length === 0;
-  if (!list) return;
-  degradations.forEach(item => {
-    const path = item.path ? ` (${item.path})` : '';
-    list.appendChild(textElement('li', `[${item.stage}] ${item.code}: ${item.summary}${path}`));
-  });
+function statusText(f) {
+  if (f.status === 'missing') return 'Empty file or missing data';
+  if (hasStageFailure()) return 'Stage issue recorded';
+  if (f.status === 'low_confidence') return 'Limited sample';
+  // 具体原因码已由表格的「Recorded limitations」列展示，这里只给一句话状态，
+  // 避免同一信息在两列重复（合并时曾出现 `Limited: <code>` 与该方法并存的死分支）。
+  if (f.limitations && f.limitations.length) return 'Limitations recorded';
+  return f.status === 'ok' || !f.status ? 'No issue flagged' : String(f.status);
 }
 
 function textElement(tag, text, className = '') {
@@ -180,12 +157,77 @@ function renderMeta() {
   el.textContent = `Repository: ${DATA.repo_path} · Mode: ${DATA.mode} · Files: ${n} · Analyzed: ${DATA.analyzed_at}`;
 }
 
+function renderCoverage(files) {
+  const summary = document.getElementById('coverage-summary');
+  const list = document.getElementById('diagnostic-list');
+  const reasons = document.getElementById('reason-counts');
+  summary.replaceChildren();
+  list.replaceChildren();
+  reasons.replaceChildren();
+  const stats = DATA.stats;
+  const diagnostics = stats && Array.isArray(stats.degradations) ? stats.degradations : [];
+  const failed = stage => diagnostics.some(item => item.stage === stage && item.code === 'stage-failed');
+  const historyUnavailable = failed('git') || failed('metrics');
+  const scoringUnavailable = historyUnavailable || failed('scoring');
+  const count = (key, unavailable) => {
+    const value = stats && stats[key];
+    return !unavailable && Number.isInteger(value) && value >= 0 ? String(value) : 'Unavailable';
+  };
+  const metrics = [
+    ['Matched files', count('files_matched', historyUnavailable)],
+    ['Scored files', count('files_emitted', scoringUnavailable)],
+    ['Files with recorded limitations', count('files_degraded', scoringUnavailable)],
+    ['Listed files', String(files.length)],
+  ];
+  metrics.forEach(([label, value]) => {
+    const item = document.createElement('div');
+    item.appendChild(textElement('dt', label));
+    item.appendChild(textElement('dd', value));
+    summary.appendChild(item);
+  });
+  if (!stats || !stats.degradations_by_code) {
+    reasons.appendChild(textElement('li', 'Reason counts unavailable.'));
+  } else {
+    const counts = Object.entries(stats.degradations_by_code).filter(([, value]) => Number(value) > 0);
+    if (!counts.length) reasons.appendChild(textElement('li', 'No reason codes recorded.'));
+    counts.sort(([a], [b]) => a.localeCompare(b));
+    counts.forEach(([code, value]) => reasons.appendChild(textElement('li', `${code}: ${value}`)));
+  }
+  if (!stats || !Array.isArray(stats.degradations)) {
+    list.appendChild(textElement('li', 'Stage event information unavailable.'));
+  } else if (!diagnostics.length) {
+    list.appendChild(textElement('li', 'No stage events recorded.'));
+  } else {
+    diagnostics.forEach(issue => {
+      const row = document.createElement('li');
+      row.appendChild(textElement('span', `${issue.stage || 'Unknown stage'} · ${issue.code || 'unknown code'}`));
+      if (issue.path) {
+        row.appendChild(textElement('span', ' · '));
+        if (files.some(file => file.path === issue.path)) {
+          const link = textElement('button', issue.path, 'path-link');
+          link.type = 'button';
+          link.addEventListener('click', () => highlightRow(issue.path));
+          row.appendChild(link);
+        } else {
+          row.appendChild(textElement('span', issue.path));
+        }
+      }
+      if (issue.summary) row.appendChild(textElement('span', ` · ${issue.summary}`));
+      if (issue.detail) row.appendChild(textElement('span', ` · ${issue.detail}`));
+      list.appendChild(row);
+    });
+  }
+}
+
 function showTooltip(anchor, f) {
   const tip = document.getElementById('tooltip');
   tip.replaceChildren();
   tip.appendChild(textElement('div', f.path, 'p'));
   tip.appendChild(textElement('div', f.status === 'missing' ? 'Score unavailable' : `${fmt(f.mode_score)} / 100`, 's'));
   tip.appendChild(textElement('div', `Status: ${statusText(f)} · Sample confidence: ${fmt(f.confidence)}`));
+  if (f.limitations && f.limitations.length) {
+    tip.appendChild(textElement('div', `Limitations: ${f.limitations.join(', ')}`));
+  }
   tip.appendChild(textElement('div',
     `Commits ${fmt(f.metrics.commits)} · Churn ${fmt(f.metrics.churn)} · ` +
     `Contributors ${fmt(f.metrics.unique_contributors)} · LOC ${fmt(f.metrics.lines_of_code)}`));
@@ -226,7 +268,8 @@ function renderHeatmap(files) {
     cell.className = 'cell';
     const loc = Number(f.metrics.lines_of_code) || 1;
     cell.style.flexGrow = Math.max(loc, 1);
-    cell.style.background = f.status === 'missing' ? '#777f8b' : scoreColor(f.mode_score);
+    const limited = hasStageFailure() || f.status === 'missing' || (f.limitations && f.limitations.length);
+    cell.style.background = limited ? '#777f8b' : scoreColor(f.mode_score);
     cell.dataset.path = f.path;
     cell.addEventListener('mouseenter', () => showTooltip(cell, f));
     cell.addEventListener('mouseleave', hideTooltip);
@@ -267,7 +310,8 @@ function renderTable(files) {
     tr.dataset.path = f.path;
     const values = [f.path, f.status === 'missing' ? '-' : fmt(f.mode_score), fmt(f.metrics.commits), fmt(f.metrics.churn),
       fmt(f.metrics.unique_contributors), fmt(f.metrics.gini), fmt(f.metrics.age_days),
-      fmt(f.metrics.lines_of_code), statusText(f), fmt(f.confidence), reasonsOf(f).join('; ')];
+      fmt(f.metrics.lines_of_code), statusText(f), (f.limitations || []).join(', ') || 'None recorded',
+      fmt(f.confidence), reasonsOf(f).join('; ')];
     values.forEach((value, index) => tr.appendChild(textElement('td', value, index === 0 ? 'path' : '')));
     tr.addEventListener('mouseenter', () => {
       const cell = [...document.querySelectorAll('.cell')].find(item => item.dataset.path === f.path);
@@ -290,7 +334,7 @@ function wireSort() {
 }
 
 renderMeta();
-renderCoverage();
+renderCoverage(DATA.files || []);
 renderHeatmap(DATA.files || []);
 renderTable(DATA.files || []);
 wireSort();

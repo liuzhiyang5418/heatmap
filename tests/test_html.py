@@ -57,8 +57,12 @@ def test_html_exposes_coverage_and_degradation_details() -> None:
 
     html = registry.render(result, "html")
 
-    assert 'id="coverage"' in html
-    assert 'id="degradation-details"' in html
+    # 覆盖率面板采用 M6 的实现（decision: 保留信息更全的版本，见合并说明）：
+    # <dl id="coverage-summary"> 汇总数、id="reason-counts" 按码计数、
+    # id="diagnostic-list" 列阶段事件。
+    assert 'id="coverage-summary"' in html
+    assert 'id="reason-counts"' in html
+    assert 'id="diagnostic-list"' in html
     assert '"files_degraded": 1' in html
     assert '"code": "syntax-error"' in html
     assert '"path": "src/broken.py"' in html
