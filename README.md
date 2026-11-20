@@ -78,13 +78,18 @@ heatmap/
 ├── src/githotmap/
 │   ├── __init__.py             # Version and public API
 │   ├── __main__.py             # python -m githotmap entry point
-│   ├── cli/main.py             # argparse CLI
+│   ├── clock.py                # Injectable clock — all time sources live here (NFR-3)
+│   ├── cli/main.py             # argparse CLI (analyze / history / serve)
 │   ├── core/                   # Models, Git collection, metrics, scoring, ranking, pipeline
-│   ├── renderers/              # Renderer protocol, registry, HTML, and JSON
+│   │   └── diagnostics.py      # Degradation codes and coverage statistics (NFR-2)
+│   ├── renderers/              # Renderer protocol, registry, HTML and JSON renderers
+│   ├── scanner/                # Repository scanner: file discovery + AST structure (M2)
+│   ├── todo/                   # TODO/FIXME/HACK/XXX detection (M3)
 │   ├── web/                    # Optional local Flask entry point
 │   ├── config/config.py        # Default weights, thresholds, and presets
 │   └── plugins/base.py         # Reserved plugin extension protocol
-├── tests/                      # Unit and system tests and fixtures
+├── docs/                       # Interfaces, NFR scope, evaluation contract, sprint records
+├── tests/                      # Unit, robustness, determinism and system tests
 └── examples/demo.py            # Programmatic usage example
 ```
 
@@ -105,7 +110,9 @@ To run the browser interaction test, set `HEATMAP_CHROME` to a local Chrome or C
 
 The [Sprint 1 record](docs/sprint-1.md) covers user stories, proposed architecture, acceptance status, and team decisions still needed.
 
-NFR-2 robustness/auditability and NFR-3 reproducibility contracts, test scope, and remaining acceptance limits are tracked in [docs/nfr2-nfr3.md](docs/nfr2-nfr3.md).
+The **frozen NFR scope** — NFR-2 robustness/auditability and NFR-3 reproducibility, with metrics, architecture decisions, exclusions and open sign-offs — is defined in [docs/nfr.md](docs/nfr.md). Implementation notes and the 2026-11-18 decision log (D-1…D-3) live in [docs/nfr2-nfr3.md](docs/nfr2-nfr3.md). The human-evaluation plan is frozen in [docs/evaluation-contract.md](docs/evaluation-contract.md) and has **not** been executed.
+
+CI runs the full test matrix (Ubuntu + Windows × Python 3.10–3.12) and a **whole-repository** `ruff` + `mypy` gate on every push and pull request.
 
 ## Research and evaluation
 

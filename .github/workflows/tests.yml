@@ -15,36 +15,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # 部分测试需要完整历史（浅克隆边界与提交计数）。
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install package and test dependencies
-        run: python -m pip install -e '.[dev,web]'
+        # 锁定 ruff / mypy 版本：pyproject.toml 未显式配置 select，
+        # 告警集合取决于这两个版本的默认规则集，锁版本门禁才可复现。
+        run: python -m pip install -e '.[dev,web]' 'ruff==0.17.5' 'mypy==2.4.1'
       - name: Run unit and system tests
         run: python -m pytest
-      - name: Lint changed NFR modules
-        run: python -m ruff check src/githotmap/core/analysis.py src/githotmap/core/git.py src/githotmap/core/models.py src/githotmap/core/pipeline.py src/githotmap/core/ranking.py src/githotmap/cli/main.py src/githotmap/renderers/html.py src/githotmap/todo/detector.py src/githotmap/todo/models.py tests/test_analysis_robustness.py tests/test_determinism.py tests/test_frozen_fingerprints.py tests/test_robustness.py tests/test_html.py tests/test_json_renderer.py tests/test_git_robustness.py --select F
-      - name: Type-check changed core modules
-        run: python -m mypy src/githotmap/core/analysis.py src/githotmap/core/git.py src/githotmap/core/models.py src/githotmap/core/pipeline.py src/githotmap/core/ranking.py src/githotmap/cli/main.py src/githotmap/todo/detector.py src/githotmap/todo/models.py
+      # 静态检查固定跑在一个组合上，避免 6 个组合重复执行。
+      # 范围是**全仓**（src tests / src），而不是「变更的 NFR 模块」：
+      # 增量门禁会让未列入清单的文件悄悄退化。
+      - name: Lint whole repository
+        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+        run: python -m ruff check src tests
+      - name: Type-check whole repository
+        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+        run: python -m mypy src
       - name: Run browser interaction test
         if: runner.os == 'Linux' && matrix.python-version == '3.12'
         env:
           HEATMAP_CHROME: /usr/bin/google-chrome
         run: python -m pytest tests/test_html_browser.py
-
-  nfr-report-quality:
-    # This first gate covers the report changes; the existing repository-wide
-    # lint and typing findings are recorded in the Sprint 2 acceptance notes.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install quality tools
-        run: python -m pip install -e '.[dev,web]' 'ruff==0.17.5' 'mypy==2.4.1'
-      - name: Lint NFR report and checks
-        run: python -m ruff check src/githotmap/renderers/html.py tests/test_html_browser.py tests/test_nfr2_system.py
-      - name: Type-check NFR report
-        run: python -m mypy src/githotmap/renderers/html.py --follow-imports=silent
