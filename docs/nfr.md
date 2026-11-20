@@ -125,13 +125,21 @@ deliberately rather than by omission.
 | Availability / service capacity | Not a deployed service; there is no SLA object. |
 | Internationalisation | Audience is developers running it locally; the report UI is English and adequate. Cost/benefit is poor at this scale. |
 | Compliance / privacy | Folded into NFR-2's data minimisation (no participant data, no personal paths in stable diagnostic detail). Too thin to stand alone. |
-| **Performance (candidate NFR-1)** | Real and measured, but **deferred to Sprint 3** — see §5. Optimising `git` collection would collide with the NFR-3 deterministic-output work in the same module. |
+| **Performance (candidate NFR-1)** | Real and measured, but **out of scope** — see §5. The course requires ≥2 NFRs and two are delivered; optimising `git` collection would rewrite the same module that NFR-3 just stabilised, and would invalidate the frozen fingerprints. |
 
 ---
 
-## 5. Deferred: performance and scale (candidate NFR-1)
+## 5. Out of scope: performance and scale (candidate NFR-1)
 
-A baseline was measured during Sprint 2 planning so the target is not invented later:
+> **Scope decision:** NFR-1 is **not** delivered. The course requires at least two NFRs for a
+> 6-person team and NFR-2 + NFR-3 satisfy that. Sprint 3 does not add performance work; it adds
+> automated tests, debugging and maintenance support. What remains below is a *measured
+> baseline kept as future work*, not a delivery commitment.
+>
+> Clarification: **no performance optimisation** does not mean **no performance guard** —
+> Sprint 3 adds a regression assertion so the current behaviour cannot silently degrade.
+
+A baseline was measured during Sprint 2 planning so the numbers are not invented later:
 
 | Repository | Files | `analyze` wall time |
 |---|---|---|
@@ -144,8 +152,9 @@ A baseline was measured during Sprint 2 planning so the target is not invented l
 Memory: 15.8 MB peak for 1000 files (≈16 KB/file).
 
 The dominant lever is already identified: `git log --numstat` single pass costs 0.264 s on the
-large-history fixture versus **1.723 s** for per-commit GitPython stats (6.5×). That refactor is
-scoped for Sprint 3 because it rewrites the same module that NFR-3 just stabilised.
+large-history fixture versus **1.723 s** for per-commit GitPython stats (6.5×). It is recorded
+here as the first step for any future performance work, but it is **not scheduled**: it rewrites
+the module that NFR-3 just stabilised and would invalidate the frozen fingerprints.
 
 ---
 
