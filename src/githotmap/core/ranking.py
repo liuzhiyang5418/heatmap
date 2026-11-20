@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import posixpath
 from collections import defaultdict
-from typing import Iterable, TypedDict
+from collections.abc import Iterable
+from typing import TypedDict
 
 from githotmap.core.models import FileResult, FolderResult
 

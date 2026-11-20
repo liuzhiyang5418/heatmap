@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import fnmatch
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 #: 默认排除规则。以 ``/`` 结尾表示「目录名」，命中路径中任一层级即生效。
 DEFAULT_EXCLUDES: tuple[str, ...] = (

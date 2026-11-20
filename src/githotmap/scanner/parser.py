@@ -20,8 +20,8 @@ from __future__ import annotations
 import ast
 import io
 import tokenize
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Iterator
 
 from githotmap.scanner.models import LineCounts, SymbolInfo, SymbolKind
 

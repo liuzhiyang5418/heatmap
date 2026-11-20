@@ -161,7 +161,7 @@ def _run_history(args: argparse.Namespace) -> int:
         )
         report_degradations(contributor_outcome)
         contributors = contributor_outcome.result
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 —— CLI 子命令兜底：单源失败不中断其余输出
         print(f"采集失败: {exc}", file=sys.stderr)
         return 1
     if contributors:
@@ -180,7 +180,7 @@ def _run_history(args: argparse.Namespace) -> int:
         branch_outcome = branch_activity_with_degradations(repo_path)
         report_degradations(branch_outcome)
         branches = branch_outcome.result
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 —— CLI 子命令兜底：单源失败不中断其余输出
         print(f"采集失败: {exc}", file=sys.stderr)
         return 1
     if branches:
@@ -200,7 +200,7 @@ def _run_history(args: argparse.Namespace) -> int:
         )
         report_degradations(islands_outcome)
         islands = islands_outcome.result
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 —— CLI 子命令兜底：单源失败不中断其余输出
         print(f"采集失败: {exc}", file=sys.stderr)
         return 1
     if islands:
@@ -220,7 +220,7 @@ def _run_history(args: argparse.Namespace) -> int:
         )
         report_degradations(frequency_outcome)
         freq = frequency_outcome.result
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 —— CLI 子命令兜底：单源失败不中断其余输出
         print(f"采集失败: {exc}", file=sys.stderr)
         return 1
     if freq.counts:

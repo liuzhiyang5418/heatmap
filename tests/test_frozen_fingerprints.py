@@ -10,7 +10,6 @@ from pathlib import Path
 from githotmap.clock import FixedClock
 from githotmap.core.pipeline import AnalysisPipeline
 
-
 _CLOCK = FixedClock(datetime(2030, 1, 1, tzinfo=timezone.utc))
 
 

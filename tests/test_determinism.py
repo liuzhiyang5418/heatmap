@@ -9,7 +9,6 @@ from githotmap.clock import FixedClock
 from githotmap.core.models import AnalysisResult, FileMetrics, FileResult
 from githotmap.core.pipeline import AnalysisPipeline
 
-
 _INSTANT = datetime(2026, 1, 2, tzinfo=timezone.utc)
 
 

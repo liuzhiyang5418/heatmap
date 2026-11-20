@@ -11,8 +11,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Any
 
 from githotmap.clock import SystemClock
 from githotmap.core.git import CommitRecord
@@ -50,7 +51,8 @@ def decay_weight(days_old: float, half_life_days: float = DECAY_HALF_LIFE_DAYS) 
     """指数衰减权重：``0.5 ** (days_old / half_life)``，越旧权重越低。"""
     if days_old < 0:
         days_old = 0.0
-    return 0.5 ** (days_old / half_life_days)
+    # float() 收窄 ``float.__pow__`` 的重载返回类型（mypy 视其为 Any）。
+    return float(0.5 ** (days_old / half_life_days))
 
 
 def aggregate_file_metrics(
@@ -67,8 +69,8 @@ def aggregate_file_metrics(
     if now is None:
         now = SystemClock().now().timestamp()
 
-    # 中间聚合结构
-    per_file: dict[str, dict] = {}
+    # 中间聚合结构：各字段类型不同（float / defaultdict / int），统一按 Any 存放。
+    per_file: dict[str, dict[str, Any]] = {}
     for rec in records:
         entry = per_file.setdefault(
             rec.file_path,
@@ -86,8 +88,7 @@ def aggregate_file_metrics(
         entry["commits"] += 1.0
         entry["churn"] += float(rec.churn)
         entry["contributors"][rec.author] += 1.0
-        if rec.timestamp < entry["first_ts"]:
-            entry["first_ts"] = rec.timestamp
+        entry["first_ts"] = min(entry["first_ts"], rec.timestamp)
 
         days_old = (now - rec.timestamp) / _SECONDS_PER_DAY
         weight = decay_weight(days_old, decay_half_life_days)
