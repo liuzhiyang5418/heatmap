@@ -136,3 +136,31 @@ Windows runs and integration into the product canonical-output API remain open.
 
 Record final acceptance against the reviewed commit, with the agreed criteria,
 platform results, outstanding exceptions, and team sign-off.
+
+## Update — Sprint 2 closeout (2026-11-20)
+
+Recorded after the integration work that followed this snapshot. Reviewed baseline:
+`main` @ `5b8b8de`.
+
+| Item | Snapshot above (`ea6a47b`) | Now (`5b8b8de`) |
+|---|---|---|
+| M3/M4 producer diagnostics | open PRs #16/#17 | **merged** |
+| Fixed clock (NFR-3) | separate branch, no PR | **merged** (`b62b00f`); decision D-2 accepted the top-level `githotmap/clock.py` location |
+| Canonical output & fingerprints | open | **implemented and tested**; decision D-3 accepted "double-run self-consistency + checkout-path independence" |
+| Coverage panel | local branch | **merged**; the duplicate M4 / M1-M6 panels were resolved in favour of the M1/M6 version, and the dead M4 DOM/JS was removed |
+| Strict mode | incomplete | **merged**; `--strict` exits 3 even when the degraded file falls outside `--limit` |
+| `ruff check src tests` | 19 findings | **0** — `All checks passed!` |
+| `mypy src` | 18 errors | **0** — `no issues found in 34 source files` |
+| CI quality gate | changed NFR modules only, `--select F` | **whole repository** (`ruff check src tests`, `mypy src`), pinned to ruff 0.17.5 / mypy 2.4.1 |
+| Full test suite | 232 passed / 1 skipped (macOS) | **286 passed / 8 skipped** |
+| NFR definition | tracked in two documents | frozen in [`docs/nfr.md`](nfr.md); pending decision #4 closed |
+| Evaluation contract | plan only | frozen in [`docs/evaluation-contract.md`](evaluation-contract.md), **not executed** |
+
+Two notes on the numbers: the local run is Windows with Python 3.15, which is why the skip
+count is higher than on macOS/CI (symlink cases plus the separately configured browser check);
+and the lint/type gate was validated locally against the pinned ruff 0.17.5 / mypy 2.4.1
+before being widened to the whole repository, so widening it does not turn CI red.
+
+**Still open** (behaviour is in place, sign-off is not): the agreed fault-class denominator,
+whether strict mode treats every warning as fatal, and the cross-platform equivalence
+boundary — see `docs/nfr.md` §7.
