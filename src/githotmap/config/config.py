@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from githotmap.core.metrics import DECAY_HALF_LIFE_DAYS, DEFAULT_RECENT_WINDOW_DAYS
 from githotmap.core.models import BreakdownKey, CompositeMode, ScoringMode
@@ -55,7 +56,7 @@ COMPOSITE_WEIGHTS: dict[CompositeMode, list[tuple[ScoringMode, float]]] = {
 }
 
 # ---- 仓库形状预设 ----
-PRESETS: dict[str, dict] = {
+PRESETS: dict[str, dict[str, Any]] = {
     "small": {
         "mode": "hot",
         "limit": 10,
@@ -116,7 +117,7 @@ class ScoringConfig:
     degrade_policy: str = "degrade"
 
     @classmethod
-    def from_preset(cls, preset_name: str) -> "ScoringConfig":
+    def from_preset(cls, preset_name: str) -> ScoringConfig:
         """依据仓库形状预设构造配置。"""
         preset = PRESETS.get(preset_name)
         if preset is None:

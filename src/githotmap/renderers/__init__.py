@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from githotmap.renderers import base, registry  # noqa: F401
-from githotmap.renderers import html  # noqa: F401  导入即注册 html 渲染器
-from githotmap.renderers import json  # noqa: F401  import registers the JSON renderer
+from githotmap.renderers import (
+    base,
+    html,
+    json,
+    registry,
+)
 
-__all__ = ["base", "registry", "html", "json"]
+__all__ = ["base", "html", "json", "registry"]

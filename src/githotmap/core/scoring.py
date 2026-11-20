@@ -23,10 +23,16 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from githotmap.core.metrics import clamp
 from githotmap.core.models import BreakdownKey, CompositeMode, FileMetrics, FileResult, ScoringMode
+
+if TYPE_CHECKING:
+    # 只用于类型注解：运行时**不能**导入 config，否则与 config→core.metrics 成环。
+    from githotmap.config.config import ScoringConfig
 
 # 归一化上限默认值：超过该值即饱和。可通过 compute_score 的 ``caps`` 参数按仓库规模覆盖
 #（例如大型仓库可调高 _MAX_COMMITS / _MAX_CHURN，避免大量文件同时饱和失去区分度）。
@@ -342,7 +348,7 @@ def _apply_recency_demotion(
     return _DEMOTION_CHAIN.get(severity, severity)
 
 
-def score_file(metrics: FileMetrics, mode: ScoringMode, config) -> FileResult:
+def score_file(metrics: FileMetrics, mode: ScoringMode, config: ScoringConfig) -> FileResult:
     """对单个文件评分：计算全部基础模式，再按活动模式决定 ``mode_score``。
 
     ``config`` 为 :class:`~githotmap.config.config.ScoringConfig`（或任何提供
@@ -402,7 +408,9 @@ def score_file(metrics: FileMetrics, mode: ScoringMode, config) -> FileResult:
     return result
 
 
-def score_files(metrics_map, mode: ScoringMode, config) -> list[FileResult]:
+def score_files(
+    metrics_map: Iterable[FileMetrics], mode: ScoringMode, config: ScoringConfig
+) -> list[FileResult]:
     """批量评分，返回 FileResult 列表（未排序）。"""
     return [score_file(m, mode, config) for m in metrics_map]
 
