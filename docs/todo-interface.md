@@ -6,7 +6,7 @@
 | 负责人 | Member 3 |
 | 对应课程分工 | 需求分析中的「正则解析、技术债信息提取」 |
 | 代码位置 | `src/githotmap/todo/` |
-| 文档状态 | v0.3.1（Sprint 2，含缺陷修复与容错契约更新） |
+| 文档状态 | v0.4（Sprint 2 NFR-2 对齐：降级可审计 + 故障注入测试） |
 | 适用版本 | githotmap 0.1.0 |
 
 ---
@@ -80,6 +80,8 @@
 - 读取源码使用 `encoding="utf-8", errors="replace"`，解码失败不抛异常；
 - 单文件读取失败（`OSError`：不存在/无权限/是目录）**跳过该文件而非中断整次检测**；
 - 带有 `symlink` / `too-large` / `not-text` 限制标记的条目直接跳过（扫描器有意不提供其内容）；
+- **NFR-2 可审计性：上述任何跳过都不静默**——每次降级都会产出一条带原因码的
+  `TodoDegradation` 记录（见 §4.5）；
 - 单文件词法/语法错误**绝不影响整体检测**，降级路径同样隔离字符串字面量中的假标记；
 - 判定为注释行使用 `tokenize` 的 `COMMENT` token；docstring 行使用 `ast`。
 
@@ -88,6 +90,24 @@
 - 所有对外数据结构均为 `dataclass(slots=True)` 并实现 `to_dict()`；
 - `to_dict()` 返回值只含 JSON 原生类型（`str/int/float/bool/None/list/dict`）；
 - 枚举字段在 `to_dict()` 中序列化为其 `str` 值。
+
+### 4.5 降级记录契约【NFR-2 · WP-1 对齐】
+
+> 本模块的每一次跳过/读取失败都产出一条 `TodoDegradation`，**绝不静默**。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `stage` | `str` | 固定 `"todo"`，标明降级阶段 |
+| `code` | `str` | 原因码：`symlink` / `too-large` / `not-text`（源自 `scanner.Limitation`）+ `unreadable`（读取失败） |
+| `path` | `str` | §4.1 规范的文件路径 |
+| `summary` | `str` | 一行人类可读说明；**只含固定文本与异常类名，不含异常消息**，保证跨平台可复现（NFR-3） |
+
+- 记录按 `(path, code)` 升序排列，同样输入得到逐字节相同输出（NFR-3）；
+- 语法错误（scanner 的 `syntax-error`）**不产生 todo 侧降级**——文件仍可读、标记照常提取，
+  该事实由 scanner 的 `FileStructure.parse_error` 承担；
+- **WP-1 交接说明**：字段形状与 NFR 计划 WP-0 的 `core.diagnostics.Degradation`
+  对齐。待 M5 的 `diagnostics.py` 落地后，流水线只需按字段名映射
+  （`stage="todo"`）即可接入 `AnalysisStats`，本模块无须改动。
 
 ---
 
@@ -122,6 +142,7 @@
 |------|------|------|
 | `path_base` | `str` | 实际使用的路径基准目录（与 M2 一致） |
 | `todos` | `list[TodoItem]` | 全部技术债条目，按 `(path, lineno, column)` 升序 |
+| `degradations` | `list[TodoDegradation]` | 全部降级记录（NFR-2），按 `(path, code)` 升序，见 §4.5 |
 
 **便捷属性与聚合方法（面向 M5/M6 开箱即用）：**
 
@@ -227,3 +248,4 @@ return jsonify(TodoDetector().detect(scan).to_dict())   # 已是 JSON 原生类�
 | v0.2 | Sprint 1 | 修复行内字符串假阳性（tokenize Token 级物理隔离）；TodoScan 增加面向 M5/M6 的聚合统计接口（total_count, paths, by_path, count_by_kind, count_by_path） | Member 3 |
 | v0.3 | Sprint 2 | 深化信息提取：TodoItem 新增 owner / ref / severity 字段与解析规则 | Member 3 |
 | v0.3.1 | Sprint 2 | 缺陷修复（缺陷总结审查）：M3-2 单文件读取失败跳过不中断；M3-3/M3-6 跳过 symlink/too-large/not-text 条目；M3-4 降级路径隔离字符串假标记；M3-5 description 剥离尾部引号（随 v0.3 一并修复并补测试） | Member 3 |
+| v0.4 | Sprint 2 | NFR-2 对齐（WP-1/WP-3 协作）：新增 `TodoDegradation` 降级记录契约（§4.5），跳过不再静默；`TodoScan.degradations` 字段；新增 9 项故障注入测试 `tests/test_todo_robustness.py`（场景 #2/#3/#4/#5/#6/#10） | Member 3 |

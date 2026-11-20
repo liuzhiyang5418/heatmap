@@ -253,8 +253,17 @@ class AnalysisPipeline:
         ranked_folders = rank_folders(folders, limit=limit if limit is not None else cfg.limit)
 
         # 7. 在截断前统计阶段事件与文件级降级，保证审计覆盖完整分析结果。
+        #    同一文件同一原因码可能被多个阶段各记一次（例如 scanner 与 todo 都
+        #    判定 not-text），这里按 (path, code) 去重，否则覆盖率报表会虚高；
+        #    阶段级事件（path 为 None）无法去重，按事件计数。
+        seen_paths: set[tuple[str, str]] = set()
         for d in stats.degradations:
             code = d.code.value
+            if d.path is not None:
+                key = (d.path, code)
+                if key in seen_paths:
+                    continue
+                seen_paths.add(key)
             stats.degradations_by_code[code] = stats.degradations_by_code.get(code, 0) + 1
         for f in files:
             for code in f.limitations:
