@@ -52,6 +52,9 @@ githotmap = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: 性能测量等耗时用例；CI 只在 Linux/Python 3.11 的单一组合上执行",
+]
 
 [tool.ruff]
 line-length = 100
