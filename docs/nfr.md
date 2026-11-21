@@ -183,10 +183,36 @@ the module that NFR-3 just stabilised and would invalidate the frozen fingerprin
 | Frozen snapshots | `tests/test_frozen_fingerprints.py` | same |
 | Quality gate | `.github/workflows/tests.yml` (whole-repo ruff + mypy) | CI status checks |
 
-## 7. Open decisions (team sign-off required)
+## 7. Confirmed decisions (signed off 2026-11-21)
 
-1. **Fault-class list** — the 12 classes above are implemented; confirm they are the agreed denominator.
-2. **Strict-mode semantics** — should every warning be fatal, or only agreed degradation classes?
-3. **Cross-platform equivalence boundary** — accept the D-3 contract (self-consistency + path independence) as the acceptance criterion, or require identical raw digests on both OSes.
+All three items were resolved by team sign-off; each was option **A** in the sign-off sheet.
 
-Until these are signed off, this document records **implemented and tested behaviour**, not team acceptance.
+| # | Decision | Confirmed outcome |
+|---|---|---|
+| 1 | Fault-class denominator | **The 12 classes in §2.2** are the agreed denominator. No additions, no removals. |
+| 2 | Strict-mode semantics | **Any degradation is fatal** under `--strict`. The default (`degrade`) policy stays best-effort; `--strict` is an explicit opt-in for "I want a clean result". |
+| 3 | Cross-platform equivalence | **Two tiers**, see §7.1 — the sign-off wording was written before Sprint 3 proved tier 1. |
+
+### 7.1 Cross-platform equivalence — two tiers
+
+The sign-off sheet justified option A with "identical raw digests do not hold on arbitrary
+repositories", because git's working-tree normalisation (`core.autocrlf`) is outside our control.
+That reasoning is correct **for external repositories** and remains our claim there.
+
+For the **frozen fixtures**, however, Sprint 3 (commit `ac54bbd`, CI run #65) showed the digests
+are in fact identical on both platforms once the fixture writer stops emitting CRLF — see the D4
+note in §3.3. The contract is therefore split rather than relaxed:
+
+| Tier | Scope | Contract | Enforced by |
+|---|---|---|---|
+| 1 | Frozen fixtures | **Identical digest on ubuntu and windows**, against one committed baseline | `test_fingerprints_match_committed_baseline` in CI (6 platform/Python combinations) |
+| 2 | Arbitrary external repositories | Self-consistency + checkout-path independence (D-3) | `test_three_frozen_snapshots_have_stable_fingerprints`, `test_frozen_snapshot_fingerprint_is_independent_of_checkout_path` |
+
+Tier 1 is the stronger claim and is what the report should cite; tier 2 is the honest claim for
+inputs we do not control. Nothing in tier 2 was weakened by tier 1 being proved.
+
+### 7.2 Outcome
+
+With these confirmed, this document records **team-accepted behaviour**, not merely implemented
+behaviour. Any future change to §2.2's fault classes, §2.5's strict semantics, or §7.1's tiers
+requires re-sign-off and a `schema_version` bump where it affects the fingerprint.
