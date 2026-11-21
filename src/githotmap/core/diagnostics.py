@@ -94,5 +94,65 @@ class AnalysisDegradedError(Exception):
         super().__init__(f"Analysis degraded in strict mode. Reasons: {codes}")
 
 
-__all__ = ["AnalysisDegradedError", "AnalysisStats", "Degradation", "DegradationCode"]
+#: 每个原因码对应「读者接下来该做什么」。
+#: 把可审计性从「知道为什么失败」推进到「知道怎么处置」，这是 Sprint 3 的
+#: 调试与维护支持要求。原则：只写**可执行**的动作或明确的「无需处理」，
+#: 不写「请检查一下」这类空话。
+REMEDIATION_HINTS: dict[DegradationCode, str] = {
+    DegradationCode.SYMLINK: (
+        "符号链接默认不跟随。确需分析其目标时，把目标文件移入仓库或用真实路径引用。"
+    ),
+    DegradationCode.NOT_TEXT: (
+        "文件被判为二进制。若属生成物，用 --exclude 跳过（如 --exclude '**/dist/')。"
+    ),
+    DegradationCode.TOO_LARGE: (
+        "文件超过 2 MB 的解析上限。大文件本身可作为拆分信号；不关心时用 --exclude 跳过。"
+    ),
+    DegradationCode.UNREADABLE: (
+        "读取失败（权限或文件被占用）。检查权限，或先关闭占用该文件的进程再扫描。"
+    ),
+    DegradationCode.UNSUPPORTED_LANGUAGE: (
+        "该后缀不做结构解析，只统计规模。需要覆盖时在 ScanConfig.include_suffixes 登记"
+        "并补对应解析器。"
+    ),
+    DegradationCode.SYNTAX_ERROR: (
+        "Python 语法错误导致结构信号缺失。先修复语法；若该文件本不该进仓库，用 --exclude 排除。"
+    ),
+    DegradationCode.GIT_QUOTEPATH: (
+        "git 输出了转义路径，会与文件系统路径对不上。确认调用 git 时已关闭 core.quotepath。"
+    ),
+    DegradationCode.STAGE_FAILED: (
+        "整个阶段失败，后续统计可能不可用。查看 detail 中的异常，多为路径、权限或 git 环境问题。"
+    ),
+    DegradationCode.REPO_NOT_GIT: (
+        "目标目录不是 Git 仓库，历史类指标不可用。请指向仓库根目录，或先 git init。"
+    ),
+    DegradationCode.EMPTY_REPO: (
+        "仓库尚无提交，历史指标为空属正常。至少产生一次提交后重跑。"
+    ),
+    DegradationCode.SHALLOW_CLONE: (
+        "浅克隆缺少父提交，边界提交的改动量无法计算。需要完整历史时执行 git fetch --unshallow。"
+    ),
+}
+
+_FALLBACK_HINT = "该原因码未登记处置建议；请参考 docs/nfr.md §2.3 的决策说明。"
+
+
+def remediation_hint(code: DegradationCode | str) -> str:
+    """返回原因码的处置建议；未知码回退到通用提示，不抛异常。"""
+    try:
+        parsed = code if isinstance(code, DegradationCode) else DegradationCode(code)
+    except ValueError:
+        return _FALLBACK_HINT
+    return REMEDIATION_HINTS.get(parsed, _FALLBACK_HINT)
+
+
+__all__ = [
+    "REMEDIATION_HINTS",
+    "AnalysisDegradedError",
+    "AnalysisStats",
+    "Degradation",
+    "DegradationCode",
+    "remediation_hint",
+]
 

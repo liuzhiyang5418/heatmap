@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Any
 
 from githotmap import __version__
 from githotmap.config.config import ScoringConfig
-from githotmap.core.diagnostics import AnalysisDegradedError
+from githotmap.core.diagnostics import AnalysisDegradedError, AnalysisStats, remediation_hint
 from githotmap.core.models import ScoringMode
 from githotmap.core.pipeline import AnalysisPipeline
 from githotmap.renderers import registry
@@ -56,6 +57,17 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument(
         "--strict", action="store_true", help="有降级发生时以退出码 3 终止"
     )
+    analyze.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="向 stderr 输出阶段耗时与降级明细（附每个原因码的处置建议）",
+    )
+    analyze.add_argument(
+        "--report-coverage",
+        metavar="PATH",
+        help="把覆盖率统计（matched/emitted/degraded、原因码分布、阶段耗时）写成 JSON",
+    )
 
     serve = sub.add_parser("serve", help="Start a local web dashboard (requires the web extra)")
     serve.add_argument("--port", type=int, default=5000, help="Local port (default: 5000)")
@@ -73,6 +85,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="知识孤岛的最小总改动量（过滤拼写修正等噪声，默认 0）",
     )
     return parser
+
+
+def _emit_diagnostics(stats: AnalysisStats) -> None:
+    """把阶段耗时与降级明细打到 stderr（``--verbose``）。
+
+    每条降级后面附该原因码的处置建议——这让输出从「知道失败了」推进到
+    「知道下一步做什么」，是 Sprint 3 调试支持的核心落点。
+    """
+    if stats.stage_elapsed_ms:
+        print("阶段耗时:", file=sys.stderr)
+        for stage, elapsed in sorted(stats.stage_elapsed_ms.items(), key=lambda kv: -kv[1]):
+            print(f"  {stage:<10} {elapsed:8.1f} ms", file=sys.stderr)
+    if not stats.degradations:
+        print("降级明细: 无", file=sys.stderr)
+        return
+    print(f"降级明细（{len(stats.degradations)} 条）:", file=sys.stderr)
+    for item in stats.degradations:
+        location = f" ({item.path})" if item.path else ""
+        print(
+            f"  [{item.stage}] {item.code.value}: {item.summary}{location}",
+            file=sys.stderr,
+        )
+        print(f"       → {remediation_hint(item.code)}", file=sys.stderr)
+
+
+def _write_coverage(path: str, stats: AnalysisStats) -> None:
+    """把覆盖率统计写成 JSON（``--report-coverage``），便于 CI 归档。"""
+    payload = stats.to_dict()
+    Path(path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    print(f"已写出覆盖率统计: {path}", file=sys.stderr)
 
 
 def _run_analyze(args: argparse.Namespace) -> int:
@@ -109,12 +154,18 @@ def _run_analyze(args: argparse.Namespace) -> int:
         print("分析被严格模式中断，检测到以下降级：", file=sys.stderr)
         for d in exc.stats.degradations:
             print(f"  - [{d.stage}] {d.code.value}: {d.summary} (path={d.path})", file=sys.stderr)
+            print(f"      → {remediation_hint(d.code)}", file=sys.stderr)
         for code, count in sorted(exc.stats.degradations_by_code.items()):
             print(f"  - {code}: {count} 处", file=sys.stderr)
         return 3
     except Exception as exc:  # noqa: BLE001 —— CLI 顶层兜底，给出可读错误
         print(f"分析失败: {exc}", file=sys.stderr)
         return 1
+
+    if args.report_coverage:
+        _write_coverage(args.report_coverage, result.stats)
+    if args.verbose:
+        _emit_diagnostics(result.stats)
 
     try:
         rendered = registry.render(result, args.output)
