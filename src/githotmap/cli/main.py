@@ -90,6 +90,12 @@ def _run_analyze(args: argparse.Namespace) -> int:
         print(f"配置错误: {exc}", file=sys.stderr)
         return 2
 
+    # 路径错误属于配置问题，返回 2；不能降级成「0 个文件的成功报告」——
+    # 那会让用户以为分析成功（NFR-2 的可诊断性要求）。
+    if not Path(args.repo_path).is_dir():
+        print(f"仓库路径不存在或不是目录: {args.repo_path}", file=sys.stderr)
+        return 2
+
     pipeline = AnalysisPipeline(config)
 
     try:
