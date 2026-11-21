@@ -97,6 +97,8 @@ heatmap/
 
 The core engine (`core/`) produces structured `AnalysisResult` data without depending on a renderer or host. Renderers implement `renderers.base.Renderer` and are registered and selected through `renderers.registry`. New formats can be added through that protocol without changing the core pipeline.
 
+Layering, the **load-bearing dependency rules**, and a full **contract index** (which doc defines what, who consumes it, which test would fail if it drifted) live in [docs/architecture.md](docs/architecture.md). The build / test / submit workflow and this project's known pitfalls are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Development
 
 ```bash
