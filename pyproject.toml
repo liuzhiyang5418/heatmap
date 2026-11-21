@@ -32,6 +32,7 @@ web = [
 ]
 dev = [
     "pytest>=7.0",
+    "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
 ]
@@ -59,3 +60,15 @@ target-version = "py310"
 [tool.mypy]
 python_version = "3.10"
 strict = true
+
+[tool.coverage.run]
+source = ["githotmap"]
+
+[tool.coverage.report]
+# 阈值按**实测值**设定，不是先定一个漂亮数字再补测试凑：
+# Sprint 2 收口时实测 93%（2068 statements / 149 missed），取 90% 作为
+# 「只升不降」的门禁，留 3% 缓冲吸收 CI 上的平台与版本差异。
+# 已知且暂不打算补的缺口：plugins/base.py（预留协议）、__main__.py（模块入口）。
+fail_under = 90
+show_missing = true
+skip_covered = true

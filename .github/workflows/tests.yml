@@ -24,8 +24,10 @@ jobs:
         # 锁定 ruff / mypy 版本：pyproject.toml 未显式配置 select，
         # 告警集合取决于这两个版本的默认规则集，锁版本门禁才可复现。
         run: python -m pip install -e '.[dev,web]' 'ruff==0.17.5' 'mypy==2.4.1'
-      - name: Run unit and system tests
-        run: python -m pytest
+      - name: Run unit and system tests with coverage
+        # 覆盖率阈值见 [tool.coverage.report] fail_under：按实测值设定
+        # （Sprint 2 收口实测 93%，门禁取 90%），作用是只升不降。
+        run: python -m pytest --cov --cov-report=term-missing
       # 静态检查固定跑在一个组合上，避免 6 个组合重复执行。
       # 范围是**全仓**（src tests / src），而不是「变更的 NFR 模块」：
       # 增量门禁会让未列入清单的文件悄悄退化。
