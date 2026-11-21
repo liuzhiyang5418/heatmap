@@ -27,7 +27,14 @@ jobs:
       - name: Run unit and system tests with coverage
         # 覆盖率阈值见 [tool.coverage.report] fail_under：按实测值设定
         # （Sprint 2 收口实测 93%，门禁取 90%），作用是只升不降。
-        run: python -m pytest --cov --cov-report=term-missing
+        # 性能类用例（marker: slow）单独在下面一个组合上跑，避免 6 个
+        # 矩阵组合各自做一遍与机器速度相关的测量。
+        run: python -m pytest --cov --cov-report=term-missing -m "not slow"
+      - name: Run performance regression guard
+        # 与机器无关的相对度量（伸缩性 < 8×、灾难上界 60s），详见
+        # tests/test_performance.py 的模块 docstring。
+        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+        run: python -m pytest -m slow
       # 静态检查固定跑在一个组合上，避免 6 个组合重复执行。
       # 范围是**全仓**（src tests / src），而不是「变更的 NFR 模块」：
       # 增量门禁会让未列入清单的文件悄悄退化。
