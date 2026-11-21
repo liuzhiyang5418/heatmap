@@ -90,7 +90,7 @@ shared code module cannot reintroduce the `config ⇄ core` cycle.
 |----|--------|--------|----------|
 | NFR-3.1 | Two runs of `canonical()` | **byte-identical** | `tests/test_determinism.py` |
 | NFR-3.2 | Frozen snapshots with stable digests | **3 snapshots**, digest stable across re-runs | `tests/test_frozen_fingerprints.py` |
-| NFR-3.3 | Cross-platform behaviour | same contract on ubuntu + windows, Python 3.10–3.12 | `.github/workflows/tests.yml` matrix |
+| NFR-3.3 | Cross-platform behaviour | **same digest on both platforms**, asserted against one committed baseline | `tests/test_frozen_fingerprints.py::test_fingerprints_match_committed_baseline` + `tests/fixtures/frozen_fingerprints.json` |
 | NFR-3.4 | Format traceability | `AnalysisResult.schema_version` present; bump on format change | `tests/test_determinism.py` |
 | NFR-3.5 | Time sources outside the clock module | **0** (`datetime.now` / `perf_counter` / `time.time`) | `tests/test_clock.py::test_time_sources_are_confined_to_clock_module` |
 
@@ -101,7 +101,19 @@ shared code module cannot reintroduce the `config ⇄ core` cycle.
 | D1 | **A single injectable clock** live at `githotmap/clock.py` (top level, not `core/`), so both `core` and `scanner` can use it without a cycle. `FixedClock` freezes `now()` and zeroes elapsed time. | Patching `datetime` in tests (brittle); putting the clock in `core/` (`scanner` would import `core`, re-creating a cycle). |
 | D2 | **`canonical()`** drops clock fields and host identity (`analyzed_at`, `scanned_at`, `elapsed_ms`, `stage_elapsed_ms`, `repo_path`, `repo_urn`), sorts keys recursively, rounds floats to 6 dp, normalizes path separators, rejects NaN/inf. | Comparing `to_dict()` directly — timestamps and checkout paths always differ. |
 | D3 | **`fingerprint()`** = lowercase SHA-256 of the canonical UTF-8 bytes. | Hashing `repr()` — unstable across Python versions. |
-| D4 | **Frozen synthetic snapshots** with fixed `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE`, LF-locked `.gitattributes`, and an injected fixed clock. | Committing expected digests produced on one OS — working-tree normalization makes raw digests legitimately differ across platforms. |
+| D4 | **Frozen synthetic snapshots** with fixed `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE`, LF-locked `.gitattributes`, an injected fixed clock, and **explicit `newline="\\n"` on every fixture write**. | ~~Committing expected digests produced on one OS~~ — **overturned in Sprint 3**: see note below. |
+| D5 | **One committed digest baseline** (`tests/fixtures/frozen_fingerprints.json`) that both platforms assert against. | Uploading two artifacts and diffing them in a third job — same guarantee, more moving parts, and the baseline itself stays unpinned. |
+
+> **D4 note — the rejected alternative turned out to be viable.** The Sprint 2 decision assumed
+> raw digests legitimately differ across platforms because of working-tree normalisation, so the
+> contract was weakened to "self-consistency + checkout-path independence" (recorded as D-3 in
+> `docs/nfr2-nfr3.md`). Sprint 3 traced the difference to our own fixture writer: `write_text`
+> defaults to translating `\n` into `\r\n` on Windows, and `size_bytes` feeds the digest. After
+> pinning `newline="\n"`, the three snapshots produce **identical digests on ubuntu-latest and
+> windows-latest across Python 3.10–3.12** (CI run #65, commit `ac54bbd`). The stronger contract
+> — one baseline, both platforms — is therefore in force; see `docs/nfr2-nfr3.md` for the
+> decision-log entry that should be superseded.
+
 
 ### 3.4 Known limits
 

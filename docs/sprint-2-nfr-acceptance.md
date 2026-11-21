@@ -164,3 +164,27 @@ before being widened to the whole repository, so widening it does not turn CI re
 **Still open** (behaviour is in place, sign-off is not): the agreed fault-class denominator,
 whether strict mode treats every warning as fatal, and the cross-platform equivalence
 boundary — see `docs/nfr.md` §7.
+
+### Cross-platform equivalence — resolved in Sprint 3
+
+The open item above was closed after this snapshot, and the original assumption was wrong.
+
+Sprint 2 assumed raw digests legitimately differ across platforms because of working-tree
+normalisation, so the fingerprint contract was weakened to "double-run self-consistency +
+checkout-path independence" (decision D-3 in `docs/nfr2-nfr3.md`). Tracing the difference
+showed it came from **our own fixture writer**: `write_text` translates `\n` into `\r\n` on
+Windows, and `size_bytes` feeds the digest.
+
+After pinning `newline="\n"` on every fixture write, the three snapshots produce identical
+digests on both platforms. CI run
+[#65](https://github.com/liuzhiyang5418/heatmap/actions/runs/44885793359) for commit `ac54bbd`
+is green on all six platform/Python combinations, each asserting the **single committed
+baseline** `tests/fixtures/frozen_fingerprints.json`. Evidence per job:
+
+| Job | Result |
+|---|---|
+| ubuntu-latest / 3.10, 3.11, 3.12 | ✅ (3.11 also ran the performance guard, whole-repo lint and mypy) |
+| windows-latest / 3.10, 3.11, 3.12 | ✅ |
+
+The stronger contract — one baseline, both platforms — is therefore in force. `docs/nfr.md`
+§3.3 records it as decision D5 and marks the earlier D-3 note as overturned.
