@@ -1,0 +1,9 @@
+{
+  "note": "NFR-3.3 frozen baselines. Both ubuntu and windows CI assert against this file, so any platform-specific drift fails the build. Regenerate ONLY with an intentional schema_version bump and record the reason.",
+  "schema_version": "1.0",
+  "fingerprints": {
+    "one": "e06d99223cc9dc5d3993235a82f035070d3bcba324c64a3fc92c7b84f7c19ca0",
+    "two": "499ec098b03722d3d9413cd607ee4c865a560b8c1fe512ce659ee4605b02594a",
+    "three": "87527df3fe246d4b99fc40f7b6326ea0e33b64317fafd455e05b8d1d9232ed96"
+  }
+}
