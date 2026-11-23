@@ -11,6 +11,14 @@
 | [PyDriller](https://github.com/ishepard/pydriller) | Git commits、modified files、diffs | 历史分析 API | 当前已有 GitPython；无明确缺口时不叠加 |
 | [Apache ECharts](https://github.com/apache/echarts) | 交互图表和 Treemap | 层级布局、提示和点击事件 | 可选扩展；当前 HTML 无 CDN，选用前评估离线打包与体积 |
 
+## 评分语义的参考实现
+
+本项目的基础模式权重、归一化上限、时间衰减与降权规则对齐 [hotspot](https://github.com/huangsam/hotspot)
+（Go，MIT，© 2025 Samuel Huang）。它不属于上表"是否引入"的范畴——我们没有引入其代码或依赖，
+只对齐评分语义，使两个工具的分数在同一口径下可比。逐项核对见
+[reference-alignment.md](reference-alignment.md)：`hot` / `risk` / `roi` 三种模式与 hotspot
+同义可比；`complexity` **同名异义**（我们引入 AST 结构信号与 SATD 密度），其分数不可直接对比。
+
 ## CodeCharta 实际观察
 
 [官方样例](https://codecharta.com/visualization/app/index.html?file=codecharta_visualization.cc.json.gz&file=codecharta_analysis.cc.json.gz&currentFilesAreSampleFiles=true) 页脚版本为 v2.5.0，使用其自带分析与可视化项目数据，没有上传仓库源码。

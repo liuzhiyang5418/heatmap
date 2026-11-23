@@ -2,6 +2,10 @@
 
 权重默认值与参考工具 hotspot 的 ``scoring_config.yaml`` 对齐，保证评分语义一致；
 复合模式配比对齐其 ``active_owners / refactor_now / legacy_debt`` 三档。
+
+参考实现：https://github.com/huangsam/hotspot （MIT，© 2025 Samuel Huang）。
+核对快照 commit ``97b6d8ab``。本项目为独立实现（非 fork、非移植），只对齐评分语义；
+逐项对照与"哪些模式同名异义"见 ``docs/research/reference-alignment.md``。
 """
 
 from __future__ import annotations

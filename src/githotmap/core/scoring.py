@@ -1,6 +1,10 @@
 """评分引擎：四种基础模式 + 三种复合模式的 0–100 分计算、分解与理由生成。
 
-算法对齐参考工具 hotspot 的 ``core/algo/score.go``：
+算法对齐参考工具 hotspot 的 ``core/algo/score.go``
+（https://github.com/huangsam/hotspot ，MIT，© 2025 Samuel Huang；核对快照 commit
+``97b6d8ab``）。逐项对照见 ``docs/research/reference-alignment.md``——其中
+``hot`` / ``risk`` / ``roi`` 与参考实现同义，``complexity`` 只借用模式名，指标集不同。
+对齐的要点：
 
 - 各指标先按可调上限归一化到 [0,1]，再按模式权重加权求和；
 - ``hot``/``roi`` 对 commits/churn 使用**指数衰减**后的近期量，突出当前瓶颈；

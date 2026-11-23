@@ -5,6 +5,7 @@
 - [论文对照与阅读依据](literature-review.md)：P1–P6、SATD 反例、churn 口径和结论边界。
 - [设计依据与实现边界](design-rationale.md)：当前能力、拟扩展与解释原则。
 - [开源工具对照](tool-comparison.md)：CodeCharta 官方样例观察及工具选型建议。
+- [与参考实现 hotspot 的评分语义对照](reference-alignment.md)：哪些模式可跨工具比较、哪些同名异义、我们改了什么。
 - [评价方案](evaluation-plan.md)：公平基线、任务评分、参与者安排与报告规范。
 - [现有扫描器接口](../scanner-interface.md)：跨模块结构和路径契约。
 
