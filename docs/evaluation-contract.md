@@ -54,11 +54,20 @@ snapshot before any session**, never after seeing results.
 | ID | Task | Ground truth / scoring | Metric |
 |----|------|------------------------|--------|
 | T1 | Find the three highest-scoring files | computed from the same snapshot; 1 point per correct file; ties resolved by path | 0–3 points, completion, time |
-| T2 | Find the top-level directory with the highest ratio of high-score files | high-score files ÷ analysable files; minimum directory size and tie rule frozen in the answer key | 1 point directory + 1 point ratio, time |
+| T2 | Find the top-level directory with the highest ratio of high-score files | high-score files ÷ analysable files; **high score = ≥ the dataset's 75th percentile**; minimum directory size and tie rule frozen in the answer key | 1 point directory + 1 point ratio, time |
 | T3 | Explain why a named file needs review | must cite **two real metrics** and must note candidate ≠ confirmed | 1 point per item, 0–3 |
 | T4 | Identify files with missing data | answer key built from the `status` field; missing ≠ low risk | correctness, time |
 
 `--limit` is fixed per snapshot so the answer key is unambiguous.
+
+**Why T2 uses a percentile rather than `severity ≥ high`.** The first implementation defined
+"high score" as `critical`/`high`, which depends on absolute thresholds (75/50). On a small
+repository the top file may score 25, so *no* file qualifies and T2 becomes unanswerable —
+observed on this very repo (`roi` mode, maximum 24.99). The 75th percentile adapts to each
+dataset, stays reproducible, and the actual threshold is written into the answer key so the
+ground truth is frozen alongside it. This is a pre-execution refinement of the task definition,
+not a post-hoc change: it was made before any session, and `docs/nfr.md` §7 records that
+changing T2's rule after data collection requires a new contract version.
 
 ---
 
