@@ -18,7 +18,11 @@ from githotmap.core.diagnostics import AnalysisStats
 
 
 class ScoringMode(str, Enum):
-    """四种基础评分模式，语义与参考工具 hotspot 对齐。"""
+    """四种基础评分模式，语义与参考工具 hotspot 对齐。
+
+    ``hot`` / ``risk`` / ``roi`` 与参考实现同义可比；``complexity`` 同名异义
+    （本项目引入 AST 结构信号）。逐项对照见 ``docs/research/reference-alignment.md``。
+    """
 
     HOT = "hot"
     RISK = "risk"
