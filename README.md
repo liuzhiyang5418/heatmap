@@ -27,7 +27,7 @@ Prioritized files ──► Renderer (interactive HTML heatmap by default; repla
 |---|---|---|
 | `hot` | Activity hotspots | Recent commits, churn, active development |
 | `risk` | Knowledge concentration and bus-factor risk | Contributor concentration, uneven ownership, potential knowledge silos |
-| `complexity` | Technical-debt candidates | Large, old files with maintenance activity |
+| `complexity` | Structural debt candidates | AST structure (cyclomatic complexity, nesting depth, symbol count), SATD density, churn and age |
 | `roi` | Heuristic refactoring priority | High churn on large files |
 
 Composite modes:
@@ -39,6 +39,16 @@ Composite modes:
 | `legacy_debt` | complexity 70% + risk 30% | Inspect concentrated legacy areas before change |
 
 Each file result includes `recency_signal` and dynamic thresholds to help distinguish an active frontier from a historical hotspot.
+
+## Relationship to the reference implementation
+
+The **scoring semantics of three base modes** — `hot`, `risk` and `roi`, including their weights, the normalisation caps, the exponential time decay and the debuff rules — are aligned with the open-source Go tool [`huangsam/hotspot`](https://github.com/huangsam/hotspot) (MIT, © 2025 Samuel Huang). This alignment is deliberate and the version is recorded, so that those three modes remain comparable between the two tools. The fourth mode and the composite weights borrow only the naming and the blend ratios.
+
+githotmap is **not a fork or a port** of that project: it is a separate Python codebase, and the scanner (AST structure), TODO/SATD detection, renderers, reason-code diagnostics and deterministic fingerprints have no counterpart there.
+
+One mode is **not** comparable. `complexity` keeps the name but uses a different metric set — AST structure and SATD density rather than file size and staleness — so its scores, and those of the `refactor_now` / `legacy_debt` composites built on it, must not be compared across the two tools.
+
+Item-by-item comparison, including which weights are identical and what we changed on purpose: [docs/research/reference-alignment.md](docs/research/reference-alignment.md).
 
 ## Quick start
 
@@ -112,7 +122,7 @@ To run the browser interaction test, set `HEATMAP_CHROME` to a local Chrome or C
 
 The [Sprint 1 record](docs/sprint-1.md) covers user stories, proposed architecture, acceptance status, and team decisions still needed.
 
-The **frozen NFR scope** — NFR-2 robustness/auditability and NFR-3 reproducibility, with metrics, architecture decisions, exclusions and open sign-offs — is defined in [docs/nfr.md](docs/nfr.md). Implementation notes and the 2026-11-18 decision log (D-1…D-3) live in [docs/nfr2-nfr3.md](docs/nfr2-nfr3.md). The human-evaluation plan is frozen in [docs/evaluation-contract.md](docs/evaluation-contract.md) and has **not** been executed.
+The **frozen NFR scope** — NFR-2 robustness/auditability and NFR-3 reproducibility, with metrics, architecture decisions, exclusions and open sign-offs — is defined in [docs/nfr.md](docs/nfr.md). Implementation notes and the 2026-11-18 decision log (D-1…D-3) live in [docs/nfr2-nfr3.md](docs/nfr2-nfr3.md). The evaluation contract ([docs/evaluation-contract.md](docs/evaluation-contract.md), v1.1) separates three questions: Q1 data correctness is covered by the test suite, Q2 ranking relevance was answered by **historical replay** against real commit windows, and Q3 interface effect (a participant study) was **dropped, not executed** — that question is reported as open, not as answered by proxy.
 
 CI runs the full test matrix (Ubuntu + Windows × Python 3.10–3.12) and a **whole-repository** `ruff` + `mypy` gate on every push and pull request.
 
@@ -120,4 +130,4 @@ CI runs the full test matrix (Ubuntu + Windows × Python 3.10–3.12) and a **wh
 
 The [research index](docs/research/README.md) links the initial six-paper comparison, design rationale, open-source tool observations, and a planned evaluation.
 
-Scores are heuristic signals for inspection and prioritization; they do not establish technical debt, defect probability, repair effort, or financial return. The `complexity` mode combines several signals and is not AST cyclomatic complexity. The pipeline counts TODO candidates but does not show the original comments or line numbers. Pipeline failures are exposed as degradation diagnostics; legacy deep-history functions warn for empty or shallow repositories, while their `*_with_degradations` counterparts return structured reasons. Results reported in research papers are not evidence that this project achieved the same effects.
+Scores are heuristic signals for inspection and prioritization; they do not establish technical debt, defect probability, repair effort, or financial return. The `complexity` mode is a **composite** of several signals; its 0–100 score is not an AST cyclomatic complexity value, even though cyclomatic complexity is one of its inputs. The pipeline counts TODO candidates but does not show the original comments or line numbers. Pipeline failures are exposed as degradation diagnostics; legacy deep-history functions warn for empty or shallow repositories, while their `*_with_degradations` counterparts return structured reasons. Results reported in research papers are not evidence that this project achieved the same effects.
