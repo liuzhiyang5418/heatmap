@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "githotmap"
-version = "0.1.0"
+version = "0.2.0"
 description = "Git 技术债热力图与优先级排序工具：把 Git 历史元数据转化为风险热力图与重构优先级排序。"
 readme = "README.md"
 requires-python = ">=3.10"
