@@ -16,9 +16,10 @@ python examples/evaluation/historical_replay.py --repo . --from <t0> --to <t1> \
 
 ---
 
-## 1. Primary window — one full iteration (`daf9500..HEAD`)
+## 1. Primary window — Sprint 1 final to `HEAD` (`daf9500..HEAD`)
 
-`daf9500` = Sprint 2 close; `HEAD` = `cbbfc80`. Window: **48 commits / 15.9 days**.
+`daf9500` = the `sprint1-final` tag (2026-11-07); `HEAD` = `cbbfc80`. Window: **48 commits /
+15.9 days** — all of Sprint 2 plus most of Sprint 3.
 
 | Quantity | Value |
 |---|---|

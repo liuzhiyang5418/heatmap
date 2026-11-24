@@ -221,8 +221,8 @@ would flatter the tool. Conversely a narrow window makes Precision collapse for 
 
 ### 11.4 Window selection (frozen, to prevent cherry-picking)
 
-- **Primary window:** one full iteration — Sprint 2 close `daf9500` → `HEAD`. Fixed here
-  **before** any result is reported.
+- **Primary window:** the span from the **Sprint 1 final tag** (`daf9500`, tagged
+  `sprint1-final`, 2026-11-07) to `HEAD`. Fixed here **before** any result is reported.
 - **Sensitivity window:** the shortest recent window actually available (`HEAD~8..HEAD`). Its
   purpose is to expose the method's failure mode, **not** to be discarded if it looks worse.
 - Any additional window must be justified by a rule stated in advance (e.g. "each past sprint"),
