@@ -122,6 +122,8 @@ To run the browser interaction test, set `HEATMAP_CHROME` to a local Chrome or C
 
 The [Sprint 1 record](docs/sprint-1.md) covers user stories, proposed architecture, acceptance status, and team decisions still needed.
 
+The **working records** behind the project's process claims — sprint plans, work-package assignments, the defect register, the sign-off sheets for the three contested NFR decisions, the burndown chart and the full presentation material — are collected in [docs/process/](docs/process/README.md), kept in their original form rather than rewritten after the fact. The final report draft is in [docs/report/final-report-draft.md](docs/report/final-report-draft.md).
+
 The **frozen NFR scope** — NFR-2 robustness/auditability and NFR-3 reproducibility, with metrics, architecture decisions, exclusions and open sign-offs — is defined in [docs/nfr.md](docs/nfr.md). Implementation notes and the 2026-11-18 decision log (D-1…D-3) live in [docs/nfr2-nfr3.md](docs/nfr2-nfr3.md). The evaluation contract ([docs/evaluation-contract.md](docs/evaluation-contract.md), v1.1) separates three questions: Q1 data correctness is covered by the test suite, Q2 ranking relevance was answered by **historical replay** against real commit windows, and Q3 interface effect (a participant study) was **dropped, not executed** — that question is reported as open, not as answered by proxy.
 
 CI runs the full test matrix (Ubuntu + Windows × Python 3.10–3.12) and a **whole-repository** `ruff` + `mypy` gate on every push and pull request.
