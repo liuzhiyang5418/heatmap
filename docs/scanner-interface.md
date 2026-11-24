@@ -7,7 +7,7 @@
 | 对应课程分工 | 需求分析中的「Python 文件扫描、代码结构解析」 |
 | 代码位置 | `src/githotmap/scanner/` |
 | 文档状态 | v0.1（Sprint 1 初稿，待 M3/M4/M5/M6 会签） |
-| 适用版本 | githotmap 0.1.0 |
+| 适用版本 | githotmap 0.1.0 起（0.2.0 未改动本契约） |
 
 ---
 
