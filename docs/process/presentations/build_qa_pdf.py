@@ -30,9 +30,9 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SRC = HERE / "答辩Q&A预案.md"
+SRC = HERE / "qa-preparation.md"
 HTML_OUT = HERE / "qa-prep.html"
-PDF_OUT = HERE / "答辩Q&A预案.pdf"
+PDF_OUT = HERE / "qa-preparation.pdf"
 
 BROWSERS = (
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",

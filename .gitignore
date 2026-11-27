@@ -29,6 +29,9 @@ dist_heatmap/
 .vscode/
 *.swp
 
+# Office 临时锁文件（Word / PowerPoint 打开文档时生成）
+~$*
+
 # 操作系统
 .DS_Store
 Thumbs.db

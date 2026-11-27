@@ -3,9 +3,9 @@
     python docs/process/presentations/build_burndown.py
 
 Output:
-    燃尽图.html
-    Sprint燃尽图.pdf
-    Sprint燃尽图.png
+    burndown.html
+    burndown.pdf
+    burndown.png
 
 Method note (worth keeping, in case the team is asked where the numbers come from)
 --------------------------------------------------------------------------------
@@ -32,9 +32,9 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-HTML_OUT = HERE / "燃尽图.html"
-PDF_OUT = HERE / "Sprint燃尽图.pdf"
-PNG_OUT = HERE / "Sprint燃尽图.png"
+HTML_OUT = HERE / "burndown.html"
+PDF_OUT = HERE / "burndown.pdf"
+PNG_OUT = HERE / "burndown.png"
 
 BROWSERS = (
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",

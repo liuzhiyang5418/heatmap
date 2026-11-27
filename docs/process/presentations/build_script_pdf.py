@@ -32,9 +32,9 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SRC = HERE / "githotmap-demo-speech-script.md"
-HTML_OUT = HERE / "githotmap-demo-speech-script.html"
-PDF_OUT = HERE / "githotmap-demo-speech-script.pdf"
+SRC = HERE / "demo-speech-script.md"
+HTML_OUT = HERE / "demo-speech-script.html"
+PDF_OUT = HERE / "demo-speech-script.pdf"
 
 EDGE_CANDIDATES = (
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",

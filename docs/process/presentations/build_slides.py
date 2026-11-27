@@ -5,7 +5,7 @@ Companion to ``demo-speech-script.md`` in this directory.
     pip install python-pptx
     python docs/process/presentations/build_slides.py
 
-Output: githotmap-demo-speech.pptx
+Output: demo-speech.pptx
 
 Difference from ``githotmap-demo-7min.pptx``
 --------------------------------------------
@@ -480,7 +480,7 @@ def build(out_path: Path) -> Path:
     prs.slide_width = W
     prs.slide_height = H
     prs.core_properties.title = "githotmap — 7-minute demo (speech version)"
-    prs.core_properties.subject = "Companion to githotmap-demo-speech-script.md"
+    prs.core_properties.subject = "Companion to demo-speech-script.md"
     prs.core_properties.author = "CS5351 team"
 
     for builder in (
@@ -495,7 +495,7 @@ def build(out_path: Path) -> Path:
 
 
 if __name__ == "__main__":
-    target = Path(__file__).with_name("githotmap-demo-speech.pptx")
+    target = Path(__file__).with_name("demo-speech.pptx")
     saved = build(target)
     print(f"wrote {saved} ({saved.stat().st_size} bytes, "
           f"{len(Presentation(saved).slides)} slides)")
