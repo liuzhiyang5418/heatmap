@@ -1,0 +1,39 @@
+# Line-ending and binary-file policy.
+#
+# Without this file, core.autocrlf=true makes git treat any blob without NUL
+# bytes as text. A PNG that happens to contain no NUL byte is then rewritten on
+# checkout (every 0x0A becomes 0x0D 0x0A), silently corrupting it. The same risk
+# applies to the decks, the PDFs and the Word report. Mark every binary format
+# explicitly so the working tree and the blob stay byte-identical.
+
+# --- binaries: never normalise, never diff as text -------------------------
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.pptx  binary
+*.docx  binary
+*.xlsx  binary
+*.zip   binary
+*.woff  binary
+*.woff2 binary
+
+# --- text: keep the repository's existing normalisation --------------------
+*.py        text
+*.md        text
+*.toml      text
+*.yaml      text
+*.yml       text
+*.json      text
+*.cfg       text
+*.txt       text
+*.html      text
+*.css       text
+*.js        text
+*.svg       text
+
+# Frozen fingerprint fixtures must be byte-identical on every platform; the
+# writer already emits LF, and this rule stops a checkout from rewriting it.
+tests/fixtures/*.json  text eol=lf
